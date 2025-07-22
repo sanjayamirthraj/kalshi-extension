@@ -382,7 +382,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     statusMessage.textContent = 'Extracting keywords...';
     
-    // Extract and display keywords first
+    // Extract and display keywords
     const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
     const extractedKeywords = await extractKeywords(pageText);
     displayKeywords(extractedKeywords);
