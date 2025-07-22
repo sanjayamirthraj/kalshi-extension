@@ -1,0 +1,1 @@
+console.log('Kalshi Market Finder content script loaded');
