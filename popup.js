@@ -81,7 +81,47 @@ async function extractKeywords(text, topK = 50) {
     // Use the TF-IDF calculation
     const scoredTerms = calculateTFIDF(text);
     
-    return filteredTerms.slice(0, topK).map(item => item.term);
+    // Filter out very short or very common terms
+    const filteredTerms = scoredTerms.filter(item => {
+      const term = item.term;
+      return term.length > 2 && 
+             !term.match(/^\d+$/) && // Not just numbers
+             item.score > 0.5; // Minimum score threshold
+    });
+    
+    // Categorize keywords by word count
+    const oneWord = [];
+    const twoWord = [];
+    const threeWord = [];
+    
+    filteredTerms.forEach((item, index) => {
+      const wordCount = item.term.split(' ').length;
+      const keywordObj = {
+        term: item.term,
+        score: item.score,
+        rank: index + 1
+      };
+      
+      if (wordCount === 1) {
+        oneWord.push(keywordObj);
+      } else if (wordCount === 2) {
+        twoWord.push(keywordObj);
+      } else if (wordCount === 3) {
+        threeWord.push(keywordObj);
+      }
+    });
+    
+    // Return categorized keywords (take top 10 from each category)
+    return {
+      oneWord: oneWord.slice(0, 10),
+      twoWord: twoWord.slice(0, 10),
+      threeWord: threeWord.slice(0, 10),
+      all: filteredTerms.slice(0, topK).map((item, index) => ({
+        term: item.term,
+        score: item.score,
+        rank: index + 1
+      }))
+    };
     
   } catch (error) {
     console.error('Error extracting keywords:', error);
@@ -92,7 +132,18 @@ async function extractKeywords(text, topK = 50) {
       .filter(word => word.length > 3);
     
     const stopWords = new Set(['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']);
-    return words.filter(word => !stopWords.has(word)).slice(0, topK);
+    const fallbackKeywords = words.filter(word => !stopWords.has(word)).slice(0, topK).map((term, index) => ({
+      term,
+      score: 1.0,
+      rank: index + 1
+    }));
+    
+    return {
+      oneWord: fallbackKeywords,
+      twoWord: [],
+      threeWord: [],
+      all: fallbackKeywords
+    };
   }
 }
 
@@ -108,9 +159,10 @@ async function calculateKeywordRelevance(pageContent, market) {
     }
     
     // Extract keywords from page content
-    const pageKeywords = await extractKeywords(pageText, 15);
+    const keywordCategories = await extractKeywords(pageText, 15);
+    const allKeywords = keywordCategories.all || [];
     
-    if (pageKeywords.length === 0) {
+    if (allKeywords.length === 0) {
       return 0;
     }
     
@@ -121,8 +173,9 @@ async function calculateKeywordRelevance(pageContent, market) {
     let matchScore = 0;
     let totalKeywordScore = 0;
     
-    pageKeywords.forEach((keyword, index) => {
-      const keywordWeight = 1 / (index + 1); // Higher weight for top keywords
+    allKeywords.forEach((keywordObj) => {
+      const keyword = keywordObj.term || keywordObj;
+      const keywordWeight = keywordObj.score || (1 / (keywordObj.rank || 1)); // Use score or rank-based weight
       totalKeywordScore += keywordWeight;
       
       if (cleanMarketText.includes(keyword.toLowerCase())) {
@@ -335,20 +388,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-function displayKeywords(keywords) {
+function displayKeywords(keywordCategories) {
   const keywordsSection = document.getElementById('keywords-section');
-  const keywordsList = document.getElementById('keywords-list');
+  const oneWordList = document.getElementById('one-word-list');
+  const twoWordList = document.getElementById('two-word-list');
+  const threeWordList = document.getElementById('three-word-list');
   
-  if (keywords.length === 0) {
+  // Helper function to create keyword tags
+  function createKeywordTags(keywords) {
+    return keywords.map(keywordObj => {
+      const keyword = keywordObj.term || keywordObj;
+      const rank = keywordObj.rank || '';
+      
+      return `<span class="keyword-tag" title="Rank: ${rank}, Score: ${keywordObj.score?.toFixed(2) || 'N/A'}">${rank ? `#${rank} ` : ''}${keyword}</span>`;
+    }).join('');
+  }
+  
+  // Handle case where keywords might be in old format or empty
+  if (!keywordCategories || (!keywordCategories.oneWord && !keywordCategories.twoWord && !keywordCategories.threeWord)) {
     keywordsSection.style.display = 'none';
     return;
   }
   
-  const keywordTags = keywords.map(keyword => 
-    `<span class="keyword-tag">${keyword}</span>`
-  ).join('');
+  // Display categorized keywords
+  oneWordList.innerHTML = createKeywordTags(keywordCategories.oneWord || []);
+  twoWordList.innerHTML = createKeywordTags(keywordCategories.twoWord || []);
+  threeWordList.innerHTML = createKeywordTags(keywordCategories.threeWord || []);
   
-  keywordsList.innerHTML = keywordTags;
+  // Hide sections that are empty
+  document.getElementById('one-word-section').style.display = keywordCategories.oneWord?.length ? 'block' : 'none';
+  document.getElementById('two-word-section').style.display = keywordCategories.twoWord?.length ? 'block' : 'none';
+  document.getElementById('three-word-section').style.display = keywordCategories.threeWord?.length ? 'block' : 'none';
+  
   keywordsSection.style.display = 'block';
 }
 

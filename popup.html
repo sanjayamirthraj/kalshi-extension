@@ -49,6 +49,12 @@
             font-size: 11px;
             white-space: nowrap;
         }
+        .keyword-category {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 3px;
+        }
     </style>
 </head>
 <body>
@@ -56,7 +62,18 @@
     
     <div id="keywords-section" style="display: none;">
         <strong>Keywords:</strong>
-        <div id="keywords-list"></div>
+        <div id="one-word-section">
+            <div style="font-size: 11px; margin-top: 5px; color: #666;"><strong>Single Words:</strong></div>
+            <div id="one-word-list" class="keyword-category"></div>
+        </div>
+        <div id="two-word-section">
+            <div style="font-size: 11px; margin-top: 8px; color: #666;"><strong>Two Words:</strong></div>
+            <div id="two-word-list" class="keyword-category"></div>
+        </div>
+        <div id="three-word-section">
+            <div style="font-size: 11px; margin-top: 8px; color: #666;"><strong>Three Words:</strong></div>
+            <div id="three-word-list" class="keyword-category"></div>
+        </div>
     </div>
     
     <div id="status-message">Analyzing page content...</div>
