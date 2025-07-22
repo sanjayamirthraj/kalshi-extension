@@ -451,9 +451,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 function displayKeywords(keywordCategories) {
   const keywordsSection = document.getElementById('keywords-section');
   const entitiesList = document.getElementById('entities-list');
-  const oneWordList = document.getElementById('one-word-list');
-  const twoWordList = document.getElementById('two-word-list');
-  const threeWordList = document.getElementById('three-word-list');
+  const keywordsList = document.getElementById('keywords-list');
   
   // Helper function to create keyword tags
   function createKeywordTags(keywords, tagClass = 'keyword-tag') {
@@ -461,37 +459,36 @@ function displayKeywords(keywordCategories) {
       const keyword = keywordObj.term || keywordObj;
       const rank = keywordObj.rank || '';
       const type = keywordObj.type || '';
-      const titleText = `Rank: ${rank}, Score: ${keywordObj.score?.toFixed(2) || 'N/A'}${type ? `, Type: ${type}` : ''}`;
+      const score = keywordObj.score || 0;
+      const titleText = `Score: ${score.toFixed(2)}${type ? `, Type: ${type}` : ''}`;
       
-      return `<span class="${tagClass}" title="${titleText}">${rank ? `#${rank} ` : ''}${keyword}${type ? ` (${type})` : ''}</span>`;
+      return `<span class="${tagClass}" title="${titleText}">${keyword}${type && type !== 'keyword' ? ` (${type})` : ''}</span>`;
     }).join('');
   }
   
-  // Handle both new server format and old fallback format
-  const oneWord = keywordCategories.one_word || keywordCategories.oneWord || [];
-  const twoWord = keywordCategories.two_word || keywordCategories.twoWord || [];
-  const threeWord = keywordCategories.three_word || keywordCategories.threeWord || [];
+  // Get entities and keywords from server response
   const entities = keywordCategories.entities || [];
+  const keywords = keywordCategories.keywords || [];
   
-  // Handle case where no keywords found
-  if (!oneWord.length && !twoWord.length && !threeWord.length && !entities.length) {
-    keywordsSection.style.display = 'none';
-    return;
+  // Always show the section if we have any data
+  keywordsSection.style.display = 'block';
+  
+  // Display entities (always shown, even if empty)
+  if (entities.length > 0) {
+    entitiesList.innerHTML = createKeywordTags(entities, 'entity-tag');
+    document.getElementById('entities-section').style.display = 'block';
+  } else {
+    entitiesList.innerHTML = '<span style="color: #999; font-style: italic;">No named entities detected</span>';
+    document.getElementById('entities-section').style.display = 'block';
   }
   
-  // Display categorized keywords
-  entitiesList.innerHTML = createKeywordTags(entities, 'entity-tag');
-  oneWordList.innerHTML = createKeywordTags(oneWord);
-  twoWordList.innerHTML = createKeywordTags(twoWord);
-  threeWordList.innerHTML = createKeywordTags(threeWord);
-  
-  // Hide sections that are empty
-  document.getElementById('entities-section').style.display = entities.length ? 'block' : 'none';
-  document.getElementById('one-word-section').style.display = oneWord.length ? 'block' : 'none';
-  document.getElementById('two-word-section').style.display = twoWord.length ? 'block' : 'none';
-  document.getElementById('three-word-section').style.display = threeWord.length ? 'block' : 'none';
-  
-  keywordsSection.style.display = 'block';
+  // Display additional keywords
+  if (keywords.length > 0) {
+    keywordsList.innerHTML = createKeywordTags(keywords, 'keyword-tag-alt');
+    document.getElementById('keywords-section-extra').style.display = 'block';
+  } else {
+    document.getElementById('keywords-section-extra').style.display = 'none';
+  }
 }
 
 function displayMarkets(markets) {

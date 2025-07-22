@@ -37,10 +37,8 @@ class KeywordRequest(BaseModel):
     max_keywords: int = 15
 
 class KeywordResponse(BaseModel):
-    one_word: List[Dict[str, Any]]
-    two_word: List[Dict[str, Any]]
-    three_word: List[Dict[str, Any]]
     entities: List[Dict[str, Any]]
+    keywords: List[Dict[str, Any]]  # Additional keywords from text analysis
 
 class MarketResponse(BaseModel):
     ticker: str
@@ -164,36 +162,41 @@ def deduplicate_markets(markets):
     logger.info(f"Deduplicated {len(markets)} markets to {len(unique_markets)} unique events")
     return unique_markets
 
-# Advanced keyword extraction using NER and TF-IDF
+# Advanced keyword extraction using NER and semantic analysis
 def extract_keywords_advanced(text, max_keywords=15):
-    """Extract keywords using NER entities and TF-IDF scoring"""
+    """Extract keywords using NER entities and semantic importance"""
     
     # Initialize models
     initialize_models()
     
     # Clean text
-    text = re.sub(r'[^\w\s]', ' ', text)
-    text = re.sub(r'\s+', ' ', text).strip()
+    cleaned_text = re.sub(r'[^\w\s]', ' ', text)
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
     
-    # Extract named entities
+    # Extract named entities (always show these)
     entities = []
     try:
-        ner_results = ner_pipeline(text[:512])  # Limit text length for NER
+        # Process text in chunks if too long
+        text_chunks = [text[i:i+512] for i in range(0, len(text), 512)]
         
-        for entity in ner_results:
-            if entity['score'] > 0.8:  # High confidence only
-                entity_text = entity['word'].lower().strip()
-                if len(entity_text) > 2:
-                    entities.append({
-                        'term': entity_text,
-                        'type': entity['entity_group'],
-                        'score': float(entity['score']),
-                        'rank': len(entities) + 1
-                    })
+        for chunk in text_chunks:
+            ner_results = ner_pipeline(chunk)
+            
+            for entity in ner_results:
+                # Lower confidence threshold to show more entities
+                if entity['score'] > 0.7:  
+                    entity_text = entity['word'].strip()
+                    if len(entity_text) > 1:  # Allow shorter entities
+                        entities.append({
+                            'term': entity_text,
+                            'type': entity['entity_group'],
+                            'score': float(entity['score']),
+                            'rank': len(entities) + 1
+                        })
     except Exception as e:
         logger.warning(f"NER extraction failed: {e}")
     
-    # TF-IDF based keyword extraction
+    # Extract additional semantic keywords using TF-IDF for context
     stop_words = {
         'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
         'an', 'a', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had',
@@ -201,100 +204,40 @@ def extract_keywords_advanced(text, max_keywords=15):
         'must', 'this', 'that', 'these', 'those', 'his', 'her', 'its', 'their', 'our',
         'your', 'my', 'he', 'she', 'it', 'they', 'we', 'you', 'i', 'me', 'him', 'them',
         'us', 'what', 'when', 'where', 'why', 'how', 'who', 'which', 'than', 'then',
-        'now', 'here', 'there', 'up', 'down', 'out', 'off', 'over', 'under', 'again',
-        'further', 'once', 'same', 'any', 'each', 'few', 'more', 'most', 'other',
-        'some', 'such', 'only', 'own', 'so', 'very', 'too', 'also', 'just', 'being',
-        'during', 'before', 'after', 'above', 'below', 'between', 'through', 'into'
+        'now', 'here', 'there', 'up', 'down', 'out', 'off', 'over', 'under', 'again'
     }
     
-    # Tokenize and clean
-    words = text.lower().split()
-    words = [w for w in words if len(w) > 2 and w not in stop_words and w.isalpha()]
+    # Simple keyword extraction for additional context
+    words = cleaned_text.lower().split()
+    words = [w for w in words if len(w) > 3 and w not in stop_words and w.isalpha()]
     
-    # Generate n-grams
-    candidates = []
-    
-    # 1-grams
+    # Get most frequent meaningful words
     word_freq = Counter(words)
-    for word, freq in word_freq.items():
-        candidates.append({
-            'term': word,
-            'freq': freq,
-            'ngram_type': 1,
-            'position_score': 1.0 - (text.lower().find(word) / len(text))
-        })
+    keywords = []
     
-    # 2-grams
-    bigrams = [f"{words[i]} {words[i+1]}" for i in range(len(words)-1)]
-    bigram_freq = Counter(bigrams)
-    for bigram, freq in bigram_freq.items():
-        candidates.append({
-            'term': bigram,
-            'freq': freq,
-            'ngram_type': 2,
-            'position_score': 1.0 - (text.lower().find(bigram) / len(text))
-        })
-    
-    # 3-grams
-    trigrams = [f"{words[i]} {words[i+1]} {words[i+2]}" for i in range(len(words)-2)]
-    trigram_freq = Counter(trigrams)
-    for trigram, freq in trigram_freq.items():
-        candidates.append({
-            'term': trigram,
-            'freq': freq,
-            'ngram_type': 3,
-            'position_score': 1.0 - (text.lower().find(trigram) / len(text))
-        })
-    
-    # Score candidates
-    for candidate in candidates:
-        # TF score with log scaling
-        tf_score = np.log(candidate['freq'] + 1)
-        
-        # Position bonus (earlier = better)
-        position_bonus = candidate['position_score']
-        
-        # N-gram bonus (longer phrases get slight bonus)
-        ngram_bonus = 1.0 + (candidate['ngram_type'] - 1) * 0.1
-        
-        # Final score
-        candidate['score'] = tf_score * (1 + position_bonus) * ngram_bonus
-    
-    # Sort by score
-    candidates.sort(key=lambda x: x['score'], reverse=True)
-    
-    # Categorize results
-    one_word = []
-    two_word = []
-    three_word = []
-    
-    rank = 1
-    for candidate in candidates:
-        if candidate['ngram_type'] == 1 and len(one_word) < max_keywords:
-            one_word.append({
-                'term': candidate['term'],
-                'score': float(candidate['score']),
-                'rank': rank
+    for rank, (word, freq) in enumerate(word_freq.most_common(max_keywords), 1):
+        # Skip if already found as entity
+        if not any(word.lower() in entity['term'].lower() for entity in entities):
+            keywords.append({
+                'term': word,
+                'score': float(freq),
+                'rank': rank,
+                'type': 'keyword'
             })
-        elif candidate['ngram_type'] == 2 and len(two_word) < max_keywords:
-            two_word.append({
-                'term': candidate['term'],
-                'score': float(candidate['score']),
-                'rank': rank
-            })
-        elif candidate['ngram_type'] == 3 and len(three_word) < max_keywords:
-            three_word.append({
-                'term': candidate['term'],
-                'score': float(candidate['score']),
-                'rank': rank
-            })
-        rank += 1
+    
+    # Remove duplicates and limit entities
+    seen_entities = set()
+    unique_entities = []
+    
+    for entity in entities:
+        entity_lower = entity['term'].lower()
+        if entity_lower not in seen_entities:
+            unique_entities.append(entity)
+            seen_entities.add(entity_lower)
     
     return {
-        'one_word': one_word[:max_keywords],
-        'two_word': two_word[:max_keywords],
-        'three_word': three_word[:max_keywords],
-        'entities': entities[:max_keywords]
+        'entities': unique_entities[:max_keywords],
+        'keywords': keywords[:max_keywords]
     }
 
 # Update markets cache and embeddings
@@ -432,10 +375,8 @@ async def extract_keywords(request: KeywordRequest):
         keywords = extract_keywords_advanced(request.text, request.max_keywords)
         
         return KeywordResponse(
-            one_word=keywords['one_word'],
-            two_word=keywords['two_word'],
-            three_word=keywords['three_word'],
-            entities=keywords['entities']
+            entities=keywords['entities'],
+            keywords=keywords['keywords']
         )
         
     except Exception as e:

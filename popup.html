@@ -57,6 +57,14 @@
             font-size: 11px;
             white-space: nowrap;
         }
+        .keyword-tag-alt {
+            background-color: #6c757d;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 12px;
+            font-size: 11px;
+            white-space: nowrap;
+        }
         .keyword-category {
             display: flex;
             flex-wrap: wrap;
@@ -69,22 +77,14 @@
     <h3>AI-Powered Market Finder</h3>
     
     <div id="keywords-section" style="display: none;">
-        <strong>Keywords:</strong>
+        <strong>AI Analysis:</strong>
         <div id="entities-section">
-            <div style="font-size: 11px; margin-top: 5px; color: #666;"><strong>Entities (NER):</strong></div>
+            <div style="font-size: 11px; margin-top: 5px; color: #666;"><strong>Named Entities:</strong></div>
             <div id="entities-list" class="keyword-category"></div>
         </div>
-        <div id="one-word-section">
-            <div style="font-size: 11px; margin-top: 8px; color: #666;"><strong>Single Words:</strong></div>
-            <div id="one-word-list" class="keyword-category"></div>
-        </div>
-        <div id="two-word-section">
-            <div style="font-size: 11px; margin-top: 8px; color: #666;"><strong>Two Words:</strong></div>
-            <div id="two-word-list" class="keyword-category"></div>
-        </div>
-        <div id="three-word-section">
-            <div style="font-size: 11px; margin-top: 8px; color: #666;"><strong>Three Words:</strong></div>
-            <div id="three-word-list" class="keyword-category"></div>
+        <div id="keywords-section-extra">
+            <div style="font-size: 11px; margin-top: 8px; color: #666;"><strong>Key Terms:</strong></div>
+            <div id="keywords-list" class="keyword-category"></div>
         </div>
     </div>
     
