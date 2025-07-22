@@ -1,89 +1,136 @@
 // Popup script
 
-// Import Transformers.js for embeddings
+// Import Transformers.js for keyword extraction
 import * as transformers from './transformers.js';
 
-// Initialize embedding model
-let embeddingPipeline = null;
+// Initialize keyword extraction model
+let keywordPipeline = null;
 let modelLoaded = false;
 
-// Load the sentence transformer model
-async function initializeEmbeddingModel() {
-  if (embeddingPipeline) return embeddingPipeline;
+// Load the keyword extraction model
+async function initializeKeywordModel() {
+  if (keywordPipeline) return keywordPipeline;
   
   try {
-    console.log('Loading embedding model...');
+    console.log('Loading keyword extraction model...');
     const { pipeline, env } = transformers;
     
     // Configure environment for Chrome extension
     env.allowRemoteModels = true;
     env.remoteHost = 'https://huggingface.co/';
     
-    // Use a lightweight sentence transformer model
-    embeddingPipeline = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+    // Use NER model for keyword/entity extraction
+    keywordPipeline = await pipeline('token-classification', 'Xenova/bert-base-NER', {
       quantized: false,
     });
     
     modelLoaded = true;
-    console.log('Embedding model loaded successfully');
-    return embeddingPipeline;
+    console.log('Keyword extraction model loaded successfully');
+    return keywordPipeline;
   } catch (error) {
-    console.error('Failed to load embedding model:', error);
+    console.error('Failed to load keyword extraction model:', error);
     modelLoaded = false;
     return null;
   }
 }
 
-// Calculate cosine similarity between two vectors
-function cosineSimilarity(vecA, vecB) {
-  if (vecA.length !== vecB.length) {
-    throw new Error('Vectors must have the same length');
+// Extract keywords from text using Hugging Face NER model
+async function extractKeywords(text, topK = 15) {
+  if (!keywordPipeline) {
+    await initializeKeywordModel();
   }
   
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
-  }
-  
-  const magnitude = Math.sqrt(normA) * Math.sqrt(normB);
-  return magnitude === 0 ? 0 : dotProduct / magnitude;
-}
-
-// Generate text embedding
-async function getTextEmbedding(text) {
-  if (!embeddingPipeline) {
-    await initializeEmbeddingModel();
-  }
-  
-  if (!embeddingPipeline) {
-    throw new Error('Embedding model not available');
+  if (!keywordPipeline) {
+    throw new Error('Keyword extraction model not available');
   }
   
   try {
     // Truncate text to avoid memory issues
     const truncatedText = text.substring(0, 512);
     
-    // Get embeddings with mean pooling
-    const result = await embeddingPipeline(truncatedText, {
-      pooling: 'mean',
-      normalize: true,
+    // Use NER model to extract named entities as keywords
+    const entities = await keywordPipeline(truncatedText);
+    
+    // Process entities and extract unique keywords
+    const keywords = new Set();
+    const entityGroups = {};
+    
+    // Group consecutive tokens of the same entity
+    entities.forEach(entity => {
+      if (entity.score > 0.5) { // Only high-confidence entities
+        const cleanWord = entity.word.replace(/^##/, ''); // Remove BERT subword markers
+        
+        if (entity.entity.startsWith('B-')) {
+          // Beginning of entity
+          const entityType = entity.entity.substring(2);
+          if (!entityGroups[entity.start]) {
+            entityGroups[entity.start] = { words: [cleanWord], type: entityType };
+          }
+        } else if (entity.entity.startsWith('I-')) {
+          // Inside entity - find the group to append to
+          const entityType = entity.entity.substring(2);
+          const groupKey = Object.keys(entityGroups).find(key => {
+            const group = entityGroups[key];
+            return group.type === entityType && Math.abs(parseInt(key) - entity.start) < 10;
+          });
+          if (groupKey && entityGroups[groupKey]) {
+            entityGroups[groupKey].words.push(cleanWord);
+          }
+        }
+      }
     });
     
-    // Convert to regular array
-    return Array.from(result.data);
+    // Convert entity groups to keywords
+    Object.values(entityGroups).forEach(group => {
+      if (group.words.length > 0) {
+        const keyword = group.words.join(' ').toLowerCase().trim();
+        if (keyword.length > 2) {
+          keywords.add(keyword);
+        }
+      }
+    });
+    
+    // Fallback: extract important single words if no entities found
+    if (keywords.size === 0) {
+      const words = truncatedText.toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .split(/\s+/)
+        .filter(word => word.length > 3);
+      
+      const stopWords = new Set(['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'this', 'that', 'these', 'those', 'will', 'would', 'should', 'could']);
+      
+      // Get word frequencies
+      const wordFreq = {};
+      words.forEach(word => {
+        if (!stopWords.has(word)) {
+          wordFreq[word] = (wordFreq[word] || 0) + 1;
+        }
+      });
+      
+      // Add top frequent words as keywords
+      Object.entries(wordFreq)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, Math.min(10, topK))
+        .forEach(([word]) => keywords.add(word));
+    }
+    
+    return Array.from(keywords).slice(0, topK);
+    
   } catch (error) {
-    console.error('Error generating embedding:', error);
-    throw error;
+    console.error('Error extracting keywords:', error);
+    // Fallback to simple word extraction
+    const words = text.toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(word => word.length > 3);
+    
+    const stopWords = new Set(['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']);
+    return words.filter(word => !stopWords.has(word)).slice(0, topK);
   }
 }
 
-// Function to calculate text similarity using vector embeddings
-async function calculateSimilarity(pageContent, market) {
+// Function to calculate keyword-based relevance score
+async function calculateKeywordRelevance(pageContent, market) {
   try {
     // Prepare text content
     const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
@@ -93,18 +140,36 @@ async function calculateSimilarity(pageContent, market) {
       return 0;
     }
     
-    // Generate embeddings for both texts
-    const pageEmbedding = await getTextEmbedding(pageText);
-    const marketEmbedding = await getTextEmbedding(marketText);
+    // Extract keywords from page content
+    const pageKeywords = await extractKeywords(pageText, 15);
     
-    // Calculate cosine similarity
-    const similarity = cosineSimilarity(pageEmbedding, marketEmbedding);
+    if (pageKeywords.length === 0) {
+      return 0;
+    }
     
-    // Normalize to 0-1 range and ensure non-negative
-    return Math.max(0, (similarity + 1) / 2); // Convert from [-1, 1] to [0, 1]
+    // Clean market text for matching
+    const cleanMarketText = marketText.toLowerCase();
+    
+    // Calculate keyword matches
+    let matchScore = 0;
+    let totalKeywordScore = 0;
+    
+    pageKeywords.forEach((keyword, index) => {
+      const keywordWeight = 1 / (index + 1); // Higher weight for top keywords
+      totalKeywordScore += keywordWeight;
+      
+      if (cleanMarketText.includes(keyword.toLowerCase())) {
+        matchScore += keywordWeight;
+      }
+    });
+    
+    // Calculate relevance score (0-1 range)
+    const relevance = totalKeywordScore > 0 ? matchScore / totalKeywordScore : 0;
+    
+    return relevance;
     
   } catch (error) {
-    console.error('Error calculating embedding similarity:', error);
+    console.error('Error calculating keyword relevance:', error);
     return 0;
   }
 }
@@ -117,27 +182,39 @@ async function findRelevantMarkets(pageContent, markets, maxResults = 5) {
       return [];
     }
     
-    console.log(`Calculating similarities for ${markets.length} markets...`);
+    // Deduplicate markets by event_ticker - keep the first occurrence
+    const uniqueMarkets = [];
+    const seenEventTickers = new Set();
     
-    // Initialize embedding model first
-    if (!modelLoaded) {
-      console.log('Initializing embedding model...');
-      await initializeEmbeddingModel();
+    for (const market of markets) {
+      if (!seenEventTickers.has(market.event_ticker)) {
+        uniqueMarkets.push(market);
+        seenEventTickers.add(market.event_ticker);
+      }
     }
     
-    // Calculate similarity scores for all markets using embeddings
-    const batchSize = 5; // Process in smaller batches to avoid overwhelming the model
+    console.log(`Deduplicated ${markets.length} markets to ${uniqueMarkets.length} unique events`);
+    console.log(`Calculating similarities for ${uniqueMarkets.length} markets...`);
+    
+    // Initialize keyword extraction model first
+    if (!modelLoaded) {
+      console.log('Initializing keyword extraction model...');
+      await initializeKeywordModel();
+    }
+    
+    // Calculate keyword relevance scores for all unique markets
+    const batchSize = 10; // Process in larger batches since keyword matching is faster
     const scoredMarkets = [];
     
-    for (let i = 0; i < markets.length; i += batchSize) {
-      const batch = markets.slice(i, i + batchSize);
-      console.log(`Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(markets.length/batchSize)}`);
+    for (let i = 0; i < uniqueMarkets.length; i += batchSize) {
+      const batch = uniqueMarkets.slice(i, i + batchSize);
+      console.log(`Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(uniqueMarkets.length/batchSize)}`);
       
       const batchPromises = batch.map(async (market) => {
-        const similarity = await calculateSimilarity(pageContent, market);
+        const relevance = await calculateKeywordRelevance(pageContent, market);
         return {
           ...market,
-          similarity
+          similarity: relevance
         };
       });
       
@@ -145,7 +222,7 @@ async function findRelevantMarkets(pageContent, markets, maxResults = 5) {
       scoredMarkets.push(...batchResults);
     }
     
-    console.log('Similarity calculation completed');
+    console.log('Keyword relevance calculation completed');
     
     // Sort by similarity score (highest first) and return top results
     const results = scoredMarkets
@@ -274,9 +351,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       throw new Error(marketResponse.error);
     }
     
+    statusMessage.textContent = 'Extracting keywords...';
+    
+    // Extract and display keywords first
+    const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
+    const extractedKeywords = await extractKeywords(pageText);
+    displayKeywords(extractedKeywords);
+    
     statusMessage.textContent = 'Finding related markets...';
     
-    // Find relevant markets using AI similarity
+    // Find relevant markets using keyword matching
     const relevantMarkets = await findRelevantMarkets(pageContent, marketResponse.markets);
     
     statusMessage.textContent = '';
@@ -287,6 +371,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     displayError(error.message || 'Failed to analyze page content');
   }
 });
+
+function displayKeywords(keywords) {
+  const keywordsSection = document.getElementById('keywords-section');
+  const keywordsList = document.getElementById('keywords-list');
+  
+  if (keywords.length === 0) {
+    keywordsSection.style.display = 'none';
+    return;
+  }
+  
+  const keywordTags = keywords.map(keyword => 
+    `<span class="keyword-tag">${keyword}</span>`
+  ).join('');
+  
+  keywordsList.innerHTML = keywordTags;
+  keywordsSection.style.display = 'block';
+}
 
 function displayMarkets(markets) {
   const marketList = document.getElementById('market-list');

@@ -7,9 +7,9 @@
         body {
             font-family: Arial, sans-serif;
             margin: 0;
-            padding: 0;
-            width: 300px;
-            height: 200px;
+            padding: 10px;
+            width: 320px;
+            min-height: 300px;
             overflow-x: hidden;
         }
         ul {
@@ -27,10 +27,38 @@
         a:hover {
             text-decoration: underline;
         }
+        #keywords-section {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+        #keywords-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 5px;
+        }
+        .keyword-tag {
+            background-color: #007bff;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 12px;
+            font-size: 11px;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
     <h3>AI-Powered Market Finder</h3>
+    
+    <div id="keywords-section" style="display: none;">
+        <strong>Keywords:</strong>
+        <div id="keywords-list"></div>
+    </div>
+    
     <div id="status-message">Analyzing page content...</div>
     <ul id="market-list">
         <li>Loading...</li>
