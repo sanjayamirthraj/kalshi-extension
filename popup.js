@@ -1,124 +1,99 @@
 // Popup script
 
-// Import Transformers.js for keyword extraction
-import * as transformers from './transformers.js';
+// Simple keyword extraction without heavy ML models
+let modelLoaded = true; // Always true for simple extraction
 
-// Initialize keyword extraction model
-let keywordPipeline = null;
-let modelLoaded = false;
+// Simple TF-IDF style keyword extraction
+function calculateTFIDF(text) {
+  // Common stop words
+  const stopWords = new Set([
+    'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+    'an', 'a', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had',
+    'do', 'does', 'did', 'will', 'would', 'should', 'could', 'can', 'may', 'might',
+    'must', 'this', 'that', 'these', 'those', 'his', 'her', 'its', 'their', 'our',
+    'your', 'my', 'he', 'she', 'it', 'they', 'we', 'you', 'i', 'me', 'him', 'them',
+    'us', 'what', 'when', 'where', 'why', 'how', 'who', 'which', 'than', 'then',
+    'now', 'here', 'there', 'up', 'down', 'out', 'off', 'over', 'under', 'again',
+    'further', 'once', 'same', 'any', 'each', 'few', 'more', 'most', 'other',
+    'some', 'such', 'only', 'own', 'so', 'very', 'too', 'also', 'just', 'being',
+    'during', 'before', 'after', 'above', 'below', 'between', 'through', 'into'
+  ]);
 
-// Load the keyword extraction model
-async function initializeKeywordModel() {
-  if (keywordPipeline) return keywordPipeline;
-  
-  try {
-    console.log('Loading keyword extraction model...');
-    const { pipeline, env } = transformers;
-    
-    // Configure environment for Chrome extension
-    env.allowRemoteModels = true;
-    env.remoteHost = 'https://huggingface.co/';
-    
-    // Use NER model for keyword/entity extraction
-    keywordPipeline = await pipeline('token-classification', 'Xenova/bert-base-NER', {
-      quantized: false,
-    });
-    
-    modelLoaded = true;
-    console.log('Keyword extraction model loaded successfully');
-    return keywordPipeline;
-  } catch (error) {
-    console.error('Failed to load keyword extraction model:', error);
-    modelLoaded = false;
-    return null;
-  }
-}
+  // Clean and tokenize text
+  const words = text.toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word.length > 2 && !stopWords.has(word));
 
-// Extract keywords from text using Hugging Face NER model
-async function extractKeywords(text, topK = 15) {
-  if (!keywordPipeline) {
-    await initializeKeywordModel();
+  // Calculate word frequencies
+  const wordFreq = {};
+  words.forEach(word => {
+    wordFreq[word] = (wordFreq[word] || 0) + 1;
+  });
+
+  // Calculate TF scores and extract meaningful phrases
+  const candidates = new Set();
+  
+  // Add single words
+  Object.keys(wordFreq).forEach(word => candidates.add(word));
+  
+  // Add bigrams
+  for (let i = 0; i < words.length - 1; i++) {
+    const bigram = `${words[i]} ${words[i + 1]}`;
+    candidates.add(bigram);
   }
   
-  if (!keywordPipeline) {
-    throw new Error('Keyword extraction model not available');
+  // Add trigrams
+  for (let i = 0; i < words.length - 2; i++) {
+    const trigram = `${words[i]} ${words[i + 1]} ${words[i + 2]}`;
+    candidates.add(trigram);
   }
-  
-  try {
-    // Truncate text to avoid memory issues
-    const truncatedText = text.substring(0, 512);
+
+  // Score candidates
+  const scored = [];
+  candidates.forEach(candidate => {
+    const candidateWords = candidate.split(' ');
+    let score = 0;
     
-    // Use NER model to extract named entities as keywords
-    const entities = await keywordPipeline(truncatedText);
-    
-    // Process entities and extract unique keywords
-    const keywords = new Set();
-    const entityGroups = {};
-    
-    // Group consecutive tokens of the same entity
-    entities.forEach(entity => {
-      if (entity.score > 0.5) { // Only high-confidence entities
-        const cleanWord = entity.word.replace(/^##/, ''); // Remove BERT subword markers
-        
-        if (entity.entity.startsWith('B-')) {
-          // Beginning of entity
-          const entityType = entity.entity.substring(2);
-          if (!entityGroups[entity.start]) {
-            entityGroups[entity.start] = { words: [cleanWord], type: entityType };
-          }
-        } else if (entity.entity.startsWith('I-')) {
-          // Inside entity - find the group to append to
-          const entityType = entity.entity.substring(2);
-          const groupKey = Object.keys(entityGroups).find(key => {
-            const group = entityGroups[key];
-            return group.type === entityType && Math.abs(parseInt(key) - entity.start) < 10;
-          });
-          if (groupKey && entityGroups[groupKey]) {
-            entityGroups[groupKey].words.push(cleanWord);
-          }
-        }
+    candidateWords.forEach(word => {
+      if (wordFreq[word]) {
+        score += Math.log(wordFreq[word] + 1); // TF with log scaling
       }
     });
     
-    // Convert entity groups to keywords
-    Object.values(entityGroups).forEach(group => {
-      if (group.words.length > 0) {
-        const keyword = group.words.join(' ').toLowerCase().trim();
-        if (keyword.length > 2) {
-          keywords.add(keyword);
-        }
-      }
-    });
-    
-    // Fallback: extract important single words if no entities found
-    if (keywords.size === 0) {
-      const words = truncatedText.toLowerCase()
-        .replace(/[^\w\s]/g, ' ')
-        .split(/\s+/)
-        .filter(word => word.length > 3);
-      
-      const stopWords = new Set(['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'this', 'that', 'these', 'those', 'will', 'would', 'should', 'could']);
-      
-      // Get word frequencies
-      const wordFreq = {};
-      words.forEach(word => {
-        if (!stopWords.has(word)) {
-          wordFreq[word] = (wordFreq[word] || 0) + 1;
-        }
-      });
-      
-      // Add top frequent words as keywords
-      Object.entries(wordFreq)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, Math.min(10, topK))
-        .forEach(([word]) => keywords.add(word));
+    // Boost score for longer phrases and capitalized words in original text
+    if (candidateWords.length > 1) score *= 1.5;
+    if (text.includes(candidate.charAt(0).toUpperCase() + candidate.slice(1))) {
+      score *= 1.3;
     }
     
-    return Array.from(keywords).slice(0, topK);
+    scored.push({ term: candidate, score });
+  });
+
+  return scored.sort((a, b) => b.score - a.score);
+}
+
+// Extract keywords using simple TF-IDF approach
+async function extractKeywords(text, topK = 15) {
+  try {
+    console.log('Extracting keywords using TF-IDF approach...');
+    
+    // Use the TF-IDF calculation
+    const scoredTerms = calculateTFIDF(text);
+    
+    // Filter out very short or very common terms
+    const filteredTerms = scoredTerms.filter(item => {
+      const term = item.term;
+      return term.length > 2 && 
+             !term.match(/^\d+$/) && // Not just numbers
+             item.score > 0.5; // Minimum score threshold
+    });
+    
+    return filteredTerms.slice(0, topK).map(item => item.term);
     
   } catch (error) {
     console.error('Error extracting keywords:', error);
-    // Fallback to simple word extraction
+    // Simple fallback
     const words = text.toLowerCase()
       .replace(/[^\w\s]/g, ' ')
       .split(/\s+/)
@@ -196,11 +171,7 @@ async function findRelevantMarkets(pageContent, markets, maxResults = 5) {
     console.log(`Deduplicated ${markets.length} markets to ${uniqueMarkets.length} unique events`);
     console.log(`Calculating similarities for ${uniqueMarkets.length} markets...`);
     
-    // Initialize keyword extraction model first
-    if (!modelLoaded) {
-      console.log('Initializing keyword extraction model...');
-      await initializeKeywordModel();
-    }
+    // No model initialization needed for simple keyword extraction
     
     // Calculate keyword relevance scores for all unique markets
     const batchSize = 10; // Process in larger batches since keyword matching is faster
