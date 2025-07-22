@@ -74,20 +74,12 @@ function calculateTFIDF(text) {
 }
 
 // Extract keywords using simple TF-IDF approach
-async function extractKeywords(text, topK = 15) {
+async function extractKeywords(text, topK = 20) {
   try {
     console.log('Extracting keywords using TF-IDF approach...');
     
     // Use the TF-IDF calculation
     const scoredTerms = calculateTFIDF(text);
-    
-    // Filter out very short or very common terms
-    const filteredTerms = scoredTerms.filter(item => {
-      const term = item.term;
-      return term.length > 2 && 
-             !term.match(/^\d+$/) && // Not just numbers
-             item.score > 0.5; // Minimum score threshold
-    });
     
     return filteredTerms.slice(0, topK).map(item => item.term);
     
