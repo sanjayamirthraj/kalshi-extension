@@ -147,7 +147,7 @@ async function extractKeywords(text, topK = 50) {
   }
 }
 
-// Function to calculate keyword-based relevance score
+// Function to calculate keyword-based relevance score with n-gram priority
 async function calculateKeywordRelevance(pageContent, market) {
   try {
     // Prepare text content
@@ -160,31 +160,44 @@ async function calculateKeywordRelevance(pageContent, market) {
     
     // Extract keywords from page content
     const keywordCategories = await extractKeywords(pageText, 15);
-    const allKeywords = keywordCategories.all || [];
     
-    if (allKeywords.length === 0) {
+    if (!keywordCategories || (!keywordCategories.oneWord && !keywordCategories.twoWord && !keywordCategories.threeWord)) {
       return 0;
     }
     
     // Clean market text for matching
     const cleanMarketText = marketText.toLowerCase();
     
-    // Calculate keyword matches
-    let matchScore = 0;
-    let totalKeywordScore = 0;
+    // Define priority weights: 1-word gets highest priority, then 2-word, then 3-word
+    const priorityWeights = {
+      oneWord: 3.0,   // Highest priority
+      twoWord: 2.0,   // Medium priority  
+      threeWord: 1.0  // Lowest priority
+    };
     
-    allKeywords.forEach((keywordObj) => {
-      const keyword = keywordObj.term || keywordObj;
-      const keywordWeight = keywordObj.score || (1 / (keywordObj.rank || 1)); // Use score or rank-based weight
-      totalKeywordScore += keywordWeight;
+    let totalMatchScore = 0;
+    let totalPossibleScore = 0;
+    
+    // Process each category with different priority weights
+    ['oneWord', 'twoWord', 'threeWord'].forEach(category => {
+      const keywords = keywordCategories[category] || [];
+      const priorityWeight = priorityWeights[category];
       
-      if (cleanMarketText.includes(keyword.toLowerCase())) {
-        matchScore += keywordWeight;
-      }
+      keywords.forEach((keywordObj) => {
+        const keyword = keywordObj.term || keywordObj;
+        const baseScore = keywordObj.score || (1 / (keywordObj.rank || 1));
+        const weightedScore = baseScore * priorityWeight;
+        
+        totalPossibleScore += weightedScore;
+        
+        if (cleanMarketText.includes(keyword.toLowerCase())) {
+          totalMatchScore += weightedScore;
+        }
+      });
     });
     
     // Calculate relevance score (0-1 range)
-    const relevance = totalKeywordScore > 0 ? matchScore / totalKeywordScore : 0;
+    const relevance = totalPossibleScore > 0 ? totalMatchScore / totalPossibleScore : 0;
     
     return relevance;
     
