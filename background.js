@@ -1,5 +1,5 @@
 // Background service worker
-const KALSHI_API_URL = 'https://api.elections.kalshi.com/trade-api/v2/markets';
+const KALSHI_API_URL = 'https://api.elections.kalshi.com/trade-api/v2/markets?limit=1000&status=open';
 
 // Function to fetch all markets from Kalshi API
 async function fetchKalshiMarkets() {
