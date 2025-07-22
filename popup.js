@@ -344,7 +344,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statusMessage = document.getElementById('status-message');
   
   try {
-    statusMessage.textContent = 'Getting page content...';
+    updateStatus('Getting page content...', true);
     
     // Get the current active tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -353,7 +353,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       throw new Error('No active tab found');
     }
     
-    statusMessage.textContent = 'Checking for background results...';
+    updateStatus('Checking for background results...', true);
     
     // First, try to get pre-computed background results
     const backgroundResults = await new Promise((resolve) => {
@@ -376,18 +376,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (backgroundResults.success && backgroundResults.cached) {
       // Use pre-computed results - instant display!
       console.log('Using pre-computed background results!');
-      statusMessage.textContent = 'Loading cached results...';
+      updateStatus('Loading cached results...', false);
       
       displayKeywords(backgroundResults.keywords);
       displayMarkets(backgroundResults.markets);
-      statusMessage.textContent = '';
+      updateStatus('');
       return;
     }
     
     // Fallback: No background results available, process fresh
     console.log('No background results available, processing fresh...');
     
-    statusMessage.textContent = 'Checking server connection...';
+    updateStatus('Checking server connection...', true);
     
     // Check if FastAPI server is running
     const serverHealthResponse = await new Promise((resolve) => {
@@ -408,14 +408,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       throw new Error('FastAPI server is not running. Please start the server with: python server.py');
     }
     
-    statusMessage.textContent = 'Extracting content...';
+    updateStatus('Extracting content...', true);
     
     // Get page content with fallback handling
     const pageContent = await getPageContent(tab);
     
     console.log('Page content extracted:', pageContent);
     
-    statusMessage.textContent = 'Extracting keywords using AI...';
+    updateStatus('Extracting keywords using AI...', true);
     
     // Extract keywords using FastAPI server
     const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
@@ -446,7 +446,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       displayKeywords(keywordResponse.keywords);
     }
     
-    statusMessage.textContent = 'Finding similar markets using AI...';
+    updateStatus('Finding similar markets using AI...', true);
     
     // Use FastAPI server for semantic similarity search
     const similarityResponse = await new Promise((resolve) => {
@@ -473,7 +473,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     const relevantMarkets = similarityResponse.results.results || [];
     
-    statusMessage.textContent = '';
+    updateStatus('');
     displayMarkets(relevantMarkets);
     
   } catch (error) {
@@ -488,15 +488,14 @@ function displayKeywords(keywordCategories) {
   const keywordsList = document.getElementById('keywords-list');
   
   // Helper function to create keyword tags
-  function createKeywordTags(keywords, tagClass = 'keyword-tag') {
+  function createKeywordTags(keywords, tagClass = 'tag tag-keyword') {
     return keywords.map(keywordObj => {
       const keyword = keywordObj.term || keywordObj;
-      const rank = keywordObj.rank || '';
       const type = keywordObj.type || '';
       const score = keywordObj.score || 0;
       const titleText = `Score: ${score.toFixed(2)}${type ? `, Type: ${type}` : ''}`;
       
-      return `<span class="${tagClass}" title="${titleText}">${keyword}${type && type !== 'keyword' ? ` (${type})` : ''}</span>`;
+      return `<span class="${tagClass}" title="${titleText}">${keyword}</span>`;
     }).join('');
   }
   
@@ -509,16 +508,16 @@ function displayKeywords(keywordCategories) {
   
   // Display entities (always shown, even if empty)
   if (entities.length > 0) {
-    entitiesList.innerHTML = createKeywordTags(entities, 'entity-tag');
+    entitiesList.innerHTML = createKeywordTags(entities, 'tag tag-entity');
     document.getElementById('entities-section').style.display = 'block';
   } else {
-    entitiesList.innerHTML = '<span style="color: #999; font-style: italic;">No named entities detected</span>';
+    entitiesList.innerHTML = '<div class="empty-state">No named entities detected</div>';
     document.getElementById('entities-section').style.display = 'block';
   }
   
   // Display additional keywords
   if (keywords.length > 0) {
-    keywordsList.innerHTML = createKeywordTags(keywords, 'keyword-tag-alt');
+    keywordsList.innerHTML = createKeywordTags(keywords, 'tag tag-keyword');
     document.getElementById('keywords-section-extra').style.display = 'block';
   } else {
     document.getElementById('keywords-section-extra').style.display = 'none';
@@ -529,7 +528,13 @@ function displayMarkets(markets) {
   const marketList = document.getElementById('market-list');
   
   if (markets.length === 0) {
-    marketList.innerHTML = '<li>No related markets found</li>';
+    marketList.innerHTML = `
+      <li class="market-item">
+        <div class="market-link">
+          <div class="empty-state">No related markets found</div>
+        </div>
+      </li>
+    `;
     return;
   }
   
@@ -538,13 +543,14 @@ function displayMarkets(markets) {
     const similarity = Math.round((market.similarity_score || market.similarity || 0) * 100);
     
     return `
-      <li>
-        <a href="${marketUrl}" target="_blank">
-          <strong>${market.title}</strong>
-          ${market.subtitle ? `<br><small style="color: #666;">${market.subtitle}</small>` : ''}
-          <br>
-          <small style="color: #007bff;">Similarity: ${similarity}%</small>
-          ${market.last_price ? ` • Last: $${(market.last_price / 100).toFixed(2)}` : ''}
+      <li class="market-item">
+        <a href="${marketUrl}" target="_blank" class="market-link">
+          <div class="market-title">${market.title}</div>
+          ${market.subtitle ? `<div class="market-subtitle">${market.subtitle}</div>` : ''}
+          <div class="market-meta">
+            <span class="similarity-score">${similarity}% match</span>
+            ${market.last_price ? `<span class="market-price">$${(market.last_price / 100).toFixed(2)}</span>` : ''}
+          </div>
         </a>
       </li>
     `;
@@ -556,6 +562,39 @@ function displayMarkets(markets) {
 function displayError(message) {
   const marketList = document.getElementById('market-list');
   const statusMessage = document.getElementById('status-message');
-  statusMessage.textContent = '';
-  marketList.innerHTML = `<li style="color: red;">${message}</li>`;
+  
+  // Hide loading spinner and show error
+  statusMessage.innerHTML = `<div class="error-message">${message}</div>`;
+  statusMessage.className = 'status-bar';
+  
+  marketList.innerHTML = `
+    <li class="market-item">
+      <div class="market-link">
+        <div class="error-message">${message}</div>
+      </div>
+    </li>
+  `;
+}
+
+// Update status message display
+function updateStatus(message, isLoading = false) {
+  const statusMessage = document.getElementById('status-message');
+  
+  if (message === '') {
+    statusMessage.style.display = 'none';
+    return;
+  }
+  
+  statusMessage.style.display = 'flex';
+  
+  if (isLoading) {
+    statusMessage.className = 'status-bar loading';
+    statusMessage.innerHTML = `
+      <div class="spinner"></div>
+      <span>${message}</span>
+    `;
+  } else {
+    statusMessage.className = 'status-bar';
+    statusMessage.innerHTML = `<span>${message}</span>`;
+  }
 }
