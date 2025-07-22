@@ -107,23 +107,47 @@ async function processPageContentInBackground(pageContent) {
     // Create query from page content
     const query = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
     
-    // Search for similar markets
-    const similarMarkets = await searchSimilarMarkets(query, 10);
-    
-    // Cache the results
-    pageResultsCache.set(cacheKey, {
-      pageContent: pageContent,
-      similarMarkets: similarMarkets,
-      timestamp: Date.now()
-    });
+    try {
+      // Extract keywords in background
+      console.log('Extracting keywords in background...');
+      const keywordResults = await extractKeywords(query, 15);
+      
+      // Search for similar markets
+      console.log('Searching for similar markets in background...');
+      const similarMarkets = await searchSimilarMarkets(query, 10);
+      
+      // Cache both keyword and similarity results
+      pageResultsCache.set(cacheKey, {
+        pageContent: pageContent,
+        keywords: keywordResults,
+        similarMarkets: similarMarkets,
+        timestamp: Date.now()
+      });
+      
+      console.log('Background processing completed:', {
+        title: pageContent.title,
+        entities: keywordResults.entities?.length || 0,
+        keywords: keywordResults.keywords?.length || 0,
+        markets: similarMarkets.results?.length || 0
+      });
+      
+    } catch (error) {
+      console.error('Error during AI processing:', error);
+      // Still cache the page content for fallback
+      pageResultsCache.set(cacheKey, {
+        pageContent: pageContent,
+        keywords: null,
+        similarMarkets: null,
+        timestamp: Date.now(),
+        error: error.message
+      });
+    }
     
     // Limit cache size
     if (pageResultsCache.size > MAX_CACHE_SIZE) {
       const firstKey = pageResultsCache.keys().next().value;
       pageResultsCache.delete(firstKey);
     }
-    
-    console.log('Background processing completed for:', pageContent.title);
     
   } catch (error) {
     console.error('Error processing page content in background:', error);
@@ -178,5 +202,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getCachedResults') {
     const cached = pageResultsCache.get(request.url);
     sendResponse(cached || null);
+  }
+  
+  if (request.action === 'getBackgroundResults') {
+    // Get pre-computed results from background processing
+    const cached = pageResultsCache.get(request.url);
+    if (cached && cached.keywords && cached.similarMarkets) {
+      sendResponse({
+        success: true,
+        keywords: cached.keywords,
+        markets: cached.similarMarkets.results,
+        cached: true
+      });
+    } else {
+      sendResponse({
+        success: false,
+        error: 'No background results available',
+        cached: false
+      });
+    }
   }
 });

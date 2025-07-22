@@ -353,6 +353,40 @@ document.addEventListener('DOMContentLoaded', async () => {
       throw new Error('No active tab found');
     }
     
+    statusMessage.textContent = 'Checking for background results...';
+    
+    // First, try to get pre-computed background results
+    const backgroundResults = await new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { 
+          action: 'getBackgroundResults',
+          url: tab.url
+        },
+        (result) => {
+          if (chrome.runtime.lastError) {
+            console.error('Chrome runtime error:', chrome.runtime.lastError);
+            resolve({ success: false });
+            return;
+          }
+          resolve(result);
+        }
+      );
+    });
+    
+    if (backgroundResults.success && backgroundResults.cached) {
+      // Use pre-computed results - instant display!
+      console.log('Using pre-computed background results!');
+      statusMessage.textContent = 'Loading cached results...';
+      
+      displayKeywords(backgroundResults.keywords);
+      displayMarkets(backgroundResults.markets);
+      statusMessage.textContent = '';
+      return;
+    }
+    
+    // Fallback: No background results available, process fresh
+    console.log('No background results available, processing fresh...');
+    
     statusMessage.textContent = 'Checking server connection...';
     
     // Check if FastAPI server is running
