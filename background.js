@@ -1,38 +1,87 @@
 // Background service worker
-const KALSHI_API_URL = 'https://api.elections.kalshi.com/trade-api/v2/markets?limit=1000&status=open';
-
-// Cache for markets and processed results
-let marketsCache = null;
-let marketsCacheTime = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const SIMILARITY_API_URL = 'http://localhost:8000';
 
 // Cache for processed page results
 const pageResultsCache = new Map();
 const MAX_CACHE_SIZE = 50;
 
-// Function to fetch all markets from Kalshi API
-async function fetchKalshiMarkets() {
+// Function to search similar markets using FastAPI server
+async function searchSimilarMarkets(query, maxResults = 10) {
   try {
-    // Return cached markets if still fresh
-    if (marketsCache && (Date.now() - marketsCacheTime) < CACHE_DURATION) {
-      return marketsCache;
-    }
+    console.log('Searching similar markets for query:', query);
+    
+    const response = await fetch(`${SIMILARITY_API_URL}/similarity`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: query,
+        max_results: maxResults
+      })
+    });
 
-    console.log('Fetching fresh markets from Kalshi API...');
-    const response = await fetch(KALSHI_API_URL);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
+
     const data = await response.json();
+    console.log(`Found ${data.results.length} similar markets from ${data.total_markets_searched} total markets`);
     
-    // Cache the results
-    marketsCache = data.markets || [];
-    marketsCacheTime = Date.now();
-    
-    return marketsCache;
+    return {
+      results: data.results,
+      totalSearched: data.total_markets_searched,
+      query: data.query
+    };
   } catch (error) {
-    console.error('Error fetching Kalshi markets:', error);
+    console.error('Error searching similar markets:', error);
     throw error;
+  }
+}
+
+// Function to extract keywords using FastAPI server
+async function extractKeywords(text, maxKeywords = 15) {
+  try {
+    console.log('Extracting keywords using FastAPI server...');
+    
+    const response = await fetch(`${SIMILARITY_API_URL}/keywords`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: text,
+        max_keywords: maxKeywords
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log(`Extracted ${data.one_word.length + data.two_word.length + data.three_word.length} keywords`);
+    
+    return data;
+  } catch (error) {
+    console.error('Error extracting keywords:', error);
+    throw error;
+  }
+}
+
+// Check if FastAPI server is running
+async function checkServerHealth() {
+  try {
+    const response = await fetch(`${SIMILARITY_API_URL}/health`);
+    if (!response.ok) {
+      throw new Error(`Server health check failed: ${response.status}`);
+    }
+    const health = await response.json();
+    console.log('Server health:', health);
+    return health.status === 'healthy';
+  } catch (error) {
+    console.error('Server health check failed:', error);
+    return false;
   }
 }
 
@@ -48,14 +97,23 @@ async function processPageContentInBackground(pageContent) {
       return;
     }
     
-    // Fetch markets
-    const markets = await fetchKalshiMarkets();
+    // Check if server is healthy
+    const isServerHealthy = await checkServerHealth();
+    if (!isServerHealthy) {
+      console.warn('FastAPI server is not available, skipping background processing');
+      return;
+    }
     
-    // We'll store the page content and let popup do the keyword processing
-    // since it has the keyword extraction logic
+    // Create query from page content
+    const query = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
+    
+    // Search for similar markets
+    const similarMarkets = await searchSimilarMarkets(query, 10);
+    
+    // Cache the results
     pageResultsCache.set(cacheKey, {
       pageContent: pageContent,
-      markets: markets,
+      similarMarkets: similarMarkets,
       timestamp: Date.now()
     });
     
@@ -74,16 +132,40 @@ async function processPageContentInBackground(pageContent) {
 
 // Listen for messages from content script and popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'fetchMarkets') {
-    fetchKalshiMarkets()
-      .then(markets => {
-        sendResponse({ success: true, markets });
+  if (request.action === 'searchSimilarMarkets') {
+    searchSimilarMarkets(request.query, request.maxResults || 10)
+      .then(results => {
+        sendResponse({ success: true, results });
       })
       .catch(error => {
         sendResponse({ success: false, error: error.message });
       });
     
     // Return true to indicate we will send a response asynchronously
+    return true;
+  }
+  
+  if (request.action === 'extractKeywords') {
+    extractKeywords(request.text, request.maxKeywords || 15)
+      .then(keywords => {
+        sendResponse({ success: true, keywords });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    
+    return true;
+  }
+  
+  if (request.action === 'checkServerHealth') {
+    checkServerHealth()
+      .then(isHealthy => {
+        sendResponse({ success: true, isHealthy });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    
     return true;
   }
   

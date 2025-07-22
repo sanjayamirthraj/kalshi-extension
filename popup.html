@@ -49,6 +49,14 @@
             font-size: 11px;
             white-space: nowrap;
         }
+        .entity-tag {
+            background-color: #28a745;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 12px;
+            font-size: 11px;
+            white-space: nowrap;
+        }
         .keyword-category {
             display: flex;
             flex-wrap: wrap;
@@ -62,8 +70,12 @@
     
     <div id="keywords-section" style="display: none;">
         <strong>Keywords:</strong>
+        <div id="entities-section">
+            <div style="font-size: 11px; margin-top: 5px; color: #666;"><strong>Entities (NER):</strong></div>
+            <div id="entities-list" class="keyword-category"></div>
+        </div>
         <div id="one-word-section">
-            <div style="font-size: 11px; margin-top: 5px; color: #666;"><strong>Single Words:</strong></div>
+            <div style="font-size: 11px; margin-top: 8px; color: #666;"><strong>Single Words:</strong></div>
             <div id="one-word-list" class="keyword-category"></div>
         </div>
         <div id="two-word-section">

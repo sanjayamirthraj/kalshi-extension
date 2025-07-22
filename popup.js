@@ -353,18 +353,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       throw new Error('No active tab found');
     }
     
-    statusMessage.textContent = 'Extracting content...';
+    statusMessage.textContent = 'Checking server connection...';
     
-    // Get page content with fallback handling
-    const pageContent = await getPageContent(tab);
-    
-    console.log('Page content extracted:', pageContent);
-    statusMessage.textContent = 'Fetching markets...';
-    
-    // Get markets from background script
-    const marketResponse = await new Promise((resolve) => {
+    // Check if FastAPI server is running
+    const serverHealthResponse = await new Promise((resolve) => {
       chrome.runtime.sendMessage(
-        { action: 'fetchMarkets' },
+        { action: 'checkServerHealth' },
         (result) => {
           if (chrome.runtime.lastError) {
             console.error('Chrome runtime error:', chrome.runtime.lastError);
@@ -376,21 +370,74 @@ document.addEventListener('DOMContentLoaded', async () => {
       );
     });
     
-    if (!marketResponse.success) {
-      throw new Error(marketResponse.error);
+    if (!serverHealthResponse.success || !serverHealthResponse.isHealthy) {
+      throw new Error('FastAPI server is not running. Please start the server with: python server.py');
     }
     
-    statusMessage.textContent = 'Extracting keywords...';
+    statusMessage.textContent = 'Extracting content...';
     
-    // Extract and display keywords
+    // Get page content with fallback handling
+    const pageContent = await getPageContent(tab);
+    
+    console.log('Page content extracted:', pageContent);
+    
+    statusMessage.textContent = 'Extracting keywords using AI...';
+    
+    // Extract keywords using FastAPI server
     const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
-    const extractedKeywords = await extractKeywords(pageText);
-    displayKeywords(extractedKeywords);
+    const keywordResponse = await new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { 
+          action: 'extractKeywords',
+          text: pageText,
+          maxKeywords: 15
+        },
+        (result) => {
+          if (chrome.runtime.lastError) {
+            console.error('Chrome runtime error:', chrome.runtime.lastError);
+            resolve({ success: false, error: 'Extension communication error' });
+            return;
+          }
+          resolve(result);
+        }
+      );
+    });
     
-    statusMessage.textContent = 'Finding related markets...';
+    if (!keywordResponse.success) {
+      console.warn('Keyword extraction failed, using fallback:', keywordResponse.error);
+      // Fallback to simple keyword extraction
+      const fallbackKeywords = await extractKeywords(pageText);
+      displayKeywords(fallbackKeywords);
+    } else {
+      displayKeywords(keywordResponse.keywords);
+    }
     
-    // Find relevant markets using keyword matching
-    const relevantMarkets = await findRelevantMarkets(pageContent, marketResponse.markets);
+    statusMessage.textContent = 'Finding similar markets using AI...';
+    
+    // Use FastAPI server for semantic similarity search
+    const similarityResponse = await new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { 
+          action: 'searchSimilarMarkets',
+          query: pageText,
+          maxResults: 10
+        },
+        (result) => {
+          if (chrome.runtime.lastError) {
+            console.error('Chrome runtime error:', chrome.runtime.lastError);
+            resolve({ success: false, error: 'Extension communication error' });
+            return;
+          }
+          resolve(result);
+        }
+      );
+    });
+    
+    if (!similarityResponse.success) {
+      throw new Error(similarityResponse.error);
+    }
+    
+    const relevantMarkets = similarityResponse.results.results || [];
     
     statusMessage.textContent = '';
     displayMarkets(relevantMarkets);
@@ -403,35 +450,46 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function displayKeywords(keywordCategories) {
   const keywordsSection = document.getElementById('keywords-section');
+  const entitiesList = document.getElementById('entities-list');
   const oneWordList = document.getElementById('one-word-list');
   const twoWordList = document.getElementById('two-word-list');
   const threeWordList = document.getElementById('three-word-list');
   
   // Helper function to create keyword tags
-  function createKeywordTags(keywords) {
+  function createKeywordTags(keywords, tagClass = 'keyword-tag') {
     return keywords.map(keywordObj => {
       const keyword = keywordObj.term || keywordObj;
       const rank = keywordObj.rank || '';
+      const type = keywordObj.type || '';
+      const titleText = `Rank: ${rank}, Score: ${keywordObj.score?.toFixed(2) || 'N/A'}${type ? `, Type: ${type}` : ''}`;
       
-      return `<span class="keyword-tag" title="Rank: ${rank}, Score: ${keywordObj.score?.toFixed(2) || 'N/A'}">${rank ? `#${rank} ` : ''}${keyword}</span>`;
+      return `<span class="${tagClass}" title="${titleText}">${rank ? `#${rank} ` : ''}${keyword}${type ? ` (${type})` : ''}</span>`;
     }).join('');
   }
   
-  // Handle case where keywords might be in old format or empty
-  if (!keywordCategories || (!keywordCategories.oneWord && !keywordCategories.twoWord && !keywordCategories.threeWord)) {
+  // Handle both new server format and old fallback format
+  const oneWord = keywordCategories.one_word || keywordCategories.oneWord || [];
+  const twoWord = keywordCategories.two_word || keywordCategories.twoWord || [];
+  const threeWord = keywordCategories.three_word || keywordCategories.threeWord || [];
+  const entities = keywordCategories.entities || [];
+  
+  // Handle case where no keywords found
+  if (!oneWord.length && !twoWord.length && !threeWord.length && !entities.length) {
     keywordsSection.style.display = 'none';
     return;
   }
   
   // Display categorized keywords
-  oneWordList.innerHTML = createKeywordTags(keywordCategories.oneWord || []);
-  twoWordList.innerHTML = createKeywordTags(keywordCategories.twoWord || []);
-  threeWordList.innerHTML = createKeywordTags(keywordCategories.threeWord || []);
+  entitiesList.innerHTML = createKeywordTags(entities, 'entity-tag');
+  oneWordList.innerHTML = createKeywordTags(oneWord);
+  twoWordList.innerHTML = createKeywordTags(twoWord);
+  threeWordList.innerHTML = createKeywordTags(threeWord);
   
   // Hide sections that are empty
-  document.getElementById('one-word-section').style.display = keywordCategories.oneWord?.length ? 'block' : 'none';
-  document.getElementById('two-word-section').style.display = keywordCategories.twoWord?.length ? 'block' : 'none';
-  document.getElementById('three-word-section').style.display = keywordCategories.threeWord?.length ? 'block' : 'none';
+  document.getElementById('entities-section').style.display = entities.length ? 'block' : 'none';
+  document.getElementById('one-word-section').style.display = oneWord.length ? 'block' : 'none';
+  document.getElementById('two-word-section').style.display = twoWord.length ? 'block' : 'none';
+  document.getElementById('three-word-section').style.display = threeWord.length ? 'block' : 'none';
   
   keywordsSection.style.display = 'block';
 }
@@ -446,14 +504,16 @@ function displayMarkets(markets) {
   
   const marketItems = markets.map(market => {
     const marketUrl = `https://kalshi.com/events/${market.event_ticker}/${market.ticker}`;
-    const similarity = Math.round(market.similarity * 100);
+    const similarity = Math.round((market.similarity_score || market.similarity || 0) * 100);
     
     return `
       <li>
         <a href="${marketUrl}" target="_blank">
           <strong>${market.title}</strong>
+          ${market.subtitle ? `<br><small style="color: #666;">${market.subtitle}</small>` : ''}
           <br>
-          <small>Match: ${similarity}%</small>
+          <small style="color: #007bff;">Similarity: ${similarity}%</small>
+          ${market.last_price ? ` • Last: $${(market.last_price / 100).toFixed(2)}` : ''}
         </a>
       </li>
     `;
