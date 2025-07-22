@@ -11,6 +11,10 @@ import torch
 import re
 from collections import Counter
 import logging
+import json
+import os
+import pickle
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +29,8 @@ ner_pipeline = None
 markets_cache = []
 embeddings_cache = []
 last_cache_update = 0
-CACHE_DURATION = 300  # 5 minutes in seconds
+CACHE_DURATION = 3600  # 1 hour in seconds (3600 seconds)
+CACHE_FILE = "kalshi_markets_cache.pkl"
 
 # Pydantic models
 class SimilarityRequest(BaseModel):
@@ -240,6 +245,58 @@ def extract_keywords_advanced(text, max_keywords=15):
         'keywords': keywords[:max_keywords]
     }
 
+# Load cache from disk
+def load_cache_from_disk():
+    """Load markets cache from disk if it exists and is fresh"""
+    global markets_cache, embeddings_cache, last_cache_update
+    
+    if not os.path.exists(CACHE_FILE):
+        logger.info("No cache file found")
+        return False
+    
+    try:
+        with open(CACHE_FILE, 'rb') as f:
+            cache_data = pickle.load(f)
+        
+        # Check if cache is still valid
+        import time
+        current_time = time.time()
+        cache_age = current_time - cache_data['timestamp']
+        
+        if cache_age < CACHE_DURATION:
+            markets_cache = cache_data['markets']
+            embeddings_cache = cache_data['embeddings']
+            last_cache_update = cache_data['timestamp']
+            
+            cache_age_minutes = cache_age / 60
+            logger.info(f"Loaded fresh cache from disk ({cache_age_minutes:.1f} minutes old, {len(markets_cache)} markets)")
+            return True
+        else:
+            logger.info(f"Cache file is too old ({cache_age/60:.1f} minutes), will refresh")
+            return False
+            
+    except Exception as e:
+        logger.warning(f"Failed to load cache from disk: {e}")
+        return False
+
+# Save cache to disk
+def save_cache_to_disk():
+    """Save current markets cache to disk"""
+    try:
+        cache_data = {
+            'markets': markets_cache,
+            'embeddings': embeddings_cache,
+            'timestamp': last_cache_update
+        }
+        
+        with open(CACHE_FILE, 'wb') as f:
+            pickle.dump(cache_data, f)
+        
+        logger.info(f"Cache saved to disk ({len(markets_cache)} markets)")
+        
+    except Exception as e:
+        logger.warning(f"Failed to save cache to disk: {e}")
+
 # Update markets cache and embeddings
 async def update_markets_cache():
     global markets_cache, embeddings_cache, last_cache_update
@@ -247,10 +304,16 @@ async def update_markets_cache():
     import time
     current_time = time.time()
     
-    # Check if cache is still fresh
+    # Check if cache is still fresh (1 hour)
     if current_time - last_cache_update < CACHE_DURATION and markets_cache:
-        logger.info("Using cached markets data")
+        cache_age_minutes = (current_time - last_cache_update) / 60
+        logger.info(f"Using cached markets data (cached {cache_age_minutes:.1f} minutes ago)")
         return
+    
+    # Try to load from disk first if memory cache is empty
+    if not markets_cache:
+        if load_cache_from_disk():
+            return
     
     logger.info("Updating markets cache...")
     
@@ -286,14 +349,24 @@ async def update_markets_cache():
     embeddings_cache = embeddings
     last_cache_update = current_time
     
-    logger.info(f"Cache updated with {len(unique_markets)} unique markets")
+    # Save cache to disk
+    save_cache_to_disk()
+    
+    logger.info(f"Cache updated with {len(unique_markets)} unique markets. Next update in {CACHE_DURATION/60:.0f} minutes.")
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize models and cache on startup"""
     logger.info("Starting up FastAPI server...")
     initialize_models()
-    await update_markets_cache()
+    
+    # Try to load cache from disk first, then fetch if needed
+    logger.info("Loading markets cache...")
+    if not load_cache_from_disk():
+        logger.info("No valid cache found, fetching fresh data...")
+        await update_markets_cache()
+    else:
+        logger.info("Using cached markets data from disk")
 
 @app.get("/")
 async def root():
@@ -301,9 +374,16 @@ async def root():
 
 @app.get("/health")
 async def health_check():
+    import time
+    current_time = time.time()
+    cache_age_minutes = (current_time - last_cache_update) / 60 if last_cache_update > 0 else 0
+    minutes_until_refresh = max(0, (CACHE_DURATION - (current_time - last_cache_update)) / 60) if last_cache_update > 0 else 0
+    
     return {
         "status": "healthy",
         "cached_markets": len(markets_cache),
+        "cache_age_minutes": round(cache_age_minutes, 1),
+        "minutes_until_refresh": round(minutes_until_refresh, 1),
         "similarity_model_loaded": similarity_model is not None,
         "keyword_model_loaded": keyword_model is not None,
         "ner_model_loaded": ner_pipeline is not None
