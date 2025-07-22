@@ -74,7 +74,7 @@ function calculateTFIDF(text) {
 }
 
 // Extract keywords using simple TF-IDF approach
-async function extractKeywords(text, topK = 20) {
+async function extractKeywords(text, topK = 50) {
   try {
     console.log('Extracting keywords using TF-IDF approach...');
     
