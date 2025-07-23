@@ -69,6 +69,52 @@ async function extractKeywords(text, maxKeywords = 15) {
   }
 }
 
+// Function to analyze sentiment using FastAPI server
+async function analyzeSentiment(text) {
+  try {
+    console.log('Analyzing sentiment using FastAPI server...');
+    const response = await fetch(`${SIMILARITY_API_URL}/sentiment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    console.log('Sentiment analysis result:', data);
+    return data;
+  } catch (error) {
+    console.error('Error analyzing sentiment:', error);
+    throw error;
+  }
+}
+
+// Function to compare article and market sentiment using FastAPI server
+async function compareSentiment(articleText, yesPrice, noPrice) {
+  try {
+    const response = await fetch(`${SIMILARITY_API_URL}/compare_sentiment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: articleText,
+        market_yes_price: yesPrice,
+        market_no_price: noPrice
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error comparing sentiment:', error);
+    return { error: error.message };
+  }
+}
+
 // Check if FastAPI server is running
 async function checkServerHealth() {
   try {
@@ -109,18 +155,45 @@ async function processPageContentInBackground(pageContent) {
     
     try {
       // Extract keywords in background
-      console.log('Extracting keywords in background...');
-      const keywordResults = await extractKeywords(query, 15);
+      // console.log('Extracting keywords in background...');
+      // const keywordResults = await extractKeywords(query, 15);
       
       // Search for similar markets
-      console.log('Searching for similar markets in background...');
-      const similarMarkets = await searchSimilarMarkets(query, 10);
+      // console.log('Searching for similar markets in background...');
+      // const similarMarkets = await searchSimilarMarkets(query, 10);
       
-      // Cache both keyword and similarity results
+      // Analyze sentiment in background
+      console.log('hello beast!!');
+      console.log('Analyzing sentiment in background...');
+      const sentimentResult = await analyzeSentiment(query);
+      console.log('Sentiment result:', sentimentResult);
+      
+      // For each relevant market, compare sentiment
+      const sentimentComparisons = await Promise.all((similarMarkets.results || []).map(async (market) => {
+        // Prefer yes_ask/no_ask, fallback to last_price
+        let yesPriceCents = market.yes_ask !== undefined && market.yes_ask !== null ? market.yes_ask : market.last_price;
+        let noPriceCents = market.no_ask !== undefined && market.no_ask !== null ? market.no_ask : (100 - (market.last_price || 0));
+        // Normalize to 0-1
+        const yesPrice = yesPriceCents / 100;
+        const noPrice = noPriceCents / 100;
+        const comparison = await compareSentiment(query, yesPrice, noPrice);
+        return {
+          market_ticker: market.ticker,
+          market_event_ticker: market.event_ticker,
+          market_title: market.title,
+          yes_price: yesPrice,
+          no_price: noPrice,
+          sentiment_comparison: comparison
+        };
+      }));
+      
+      // Cache all results
       pageResultsCache.set(cacheKey, {
         pageContent: pageContent,
         keywords: keywordResults,
         similarMarkets: similarMarkets,
+        sentiment: sentimentResult,
+        sentimentComparisons: sentimentComparisons,
         timestamp: Date.now()
       });
       
@@ -128,7 +201,9 @@ async function processPageContentInBackground(pageContent) {
         title: pageContent.title,
         entities: keywordResults.entities?.length || 0,
         keywords: keywordResults.keywords?.length || 0,
-        markets: similarMarkets.results?.length || 0
+        markets: similarMarkets.results?.length || 0,
+        sentiment: sentimentResult?.sentiment || 'none',
+        sentimentComparisons: sentimentComparisons.length
       });
       
     } catch (error) {
@@ -221,5 +296,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         cached: false
       });
     }
+  }
+
+  if (request.action === 'analyzeSentiment') {
+    analyzeSentiment(request.text)
+      .then(result => {
+        sendResponse({ success: true, result });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Indicates async response
   }
 });

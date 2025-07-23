@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import httpx
@@ -31,6 +32,23 @@ embeddings_cache = []
 last_cache_update = 0
 CACHE_DURATION = 3600  # 1 hour in seconds (3600 seconds)
 CACHE_FILE = "kalshi_markets_cache.pkl"
+
+# Global sentiment analysis pipeline
+sentiment_pipeline = None
+
+def get_sentiment_pipeline():
+    global sentiment_pipeline
+    if sentiment_pipeline is None:
+        sentiment_pipeline = pipeline('sentiment-analysis')
+    return sentiment_pipeline
+
+def get_optimism_score(label, score):
+    if label.upper() == 'POSITIVE':
+        return score
+    elif label.upper() == 'NEGATIVE':
+        return 1 - score
+    else:
+        return 0.5  # Neutral or unknown
 
 # Pydantic models
 class SimilarityRequest(BaseModel):
@@ -475,6 +493,79 @@ async def refresh_cache():
         "message": "Cache refreshed successfully",
         "total_markets": len(markets_cache)
     }
+
+@app.post("/sentiment")
+async def sentiment(request: Request):
+    data = await request.json()
+    text = data.get('text', '')
+    logger.info(f"/sentiment called. Text length: {len(text)}")
+    # Limit to first 3000 characters for now (simple implementation)
+    limited_text = text[:3000]
+    # TODO: Add chunking/aggregation for longer texts in the future
+    try:
+        pipe = get_sentiment_pipeline()
+        result = pipe(limited_text)
+        # result is a list of dicts, take the first
+        sentiment_label = result[0]['label']
+        sentiment_score = float(result[0]['score'])
+        logger.info(f"Sentiment result: {sentiment_label} (score: {sentiment_score:.2f})")
+        response = {
+            'sentiment': sentiment_label,
+            'score': sentiment_score,
+            'input_text': limited_text
+        }
+    except Exception as e:
+        logger.error(f"Error in /sentiment: {e}", exc_info=True)
+        response = {
+            'sentiment': 'neutral',
+            'score': 0.5,
+            'input_text': limited_text,
+            'error': str(e)
+        }
+    return JSONResponse(content=response)
+
+@app.post("/compare_sentiment")
+async def compare_sentiment(request: Request):
+    data = await request.json()
+    text = data.get('text', '')
+    market_yes_price = data.get('market_yes_price', None)
+    market_no_price = data.get('market_no_price', None)
+    logger.info(f"/compare_sentiment called. Market YES price: {market_yes_price}, Market NO price: {market_no_price}, Text length: {len(text)}")
+    if market_yes_price is None or market_no_price is None:
+        logger.warning("market_yes_price or market_no_price missing in request.")
+        return JSONResponse(status_code=400, content={"error": "market_yes_price and market_no_price are required and should be floats between 0 and 1."})
+    limited_text = text[:3000]
+    try:
+        pipe = get_sentiment_pipeline()
+        result = pipe(limited_text)
+        sentiment_label = result[0]['label']
+        sentiment_score = float(result[0]['score'])
+        article_optimism = get_optimism_score(sentiment_label, sentiment_score)
+        market_optimism = float(market_yes_price)  # For now, use YES price as optimism
+        delta = article_optimism - market_optimism
+        logger.info(f"Article optimism: {article_optimism:.2f}, Market YES optimism: {market_optimism:.2f}, Market NO price: {market_no_price}, Delta: {delta:.2f}")
+        response = {
+            'article_sentiment_label': sentiment_label,
+            'article_sentiment_score': sentiment_score,
+            'article_optimism': article_optimism,
+            'market_yes_price': float(market_yes_price),
+            'market_no_price': float(market_no_price),
+            'market_optimism': market_optimism,
+            'delta': delta,
+            'input_text': limited_text
+        }
+    except Exception as e:
+        logger.error(f"Error in /compare_sentiment: {e}", exc_info=True)
+        response = {
+            'error': str(e),
+            'article_optimism': None,
+            'market_yes_price': market_yes_price,
+            'market_no_price': market_no_price,
+            'market_optimism': None,
+            'delta': None,
+            'input_text': limited_text
+        }
+    return JSONResponse(content=response)
 
 if __name__ == "__main__":
     import uvicorn

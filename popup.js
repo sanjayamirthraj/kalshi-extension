@@ -340,7 +340,11 @@ async function getPageContent(tab) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Display a test message in the popup UI
   const marketList = document.getElementById('market-list');
+  if (marketList) {
+    marketList.innerHTML = '<li class="market-item"><div class="market-link"><div class="empty-state">Hello Armaan</div></div></li>';
+  }
   const statusMessage = document.getElementById('status-message');
   
   try {
@@ -415,8 +419,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     console.log('Page content extracted:', pageContent);
     
+    // Commenting out all keyword extraction and display logic
+    /*
     updateStatus('Extracting keywords using AI...', true);
-    
     // Extract keywords using FastAPI server
     const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
     const keywordResponse = await new Promise((resolve) => {
@@ -436,7 +441,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       );
     });
-    
     if (!keywordResponse.success) {
       console.warn('Keyword extraction failed, using fallback:', keywordResponse.error);
       // Fallback to simple keyword extraction
@@ -445,6 +449,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       displayKeywords(keywordResponse.keywords);
     }
+    */
     
     updateStatus('Finding similar markets using AI...', true);
     
