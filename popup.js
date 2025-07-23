@@ -162,7 +162,23 @@ function displayMarkets(markets) {
     return;
   }
   
-  const marketItems = markets.map(market => {
+  // Add CSS for hover effects
+  if (!document.getElementById('market-hover-styles')) {
+    const style = document.createElement('style');
+    style.id = 'market-hover-styles';
+    style.textContent = `
+      .market-row {
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+      }
+      .market-row:hover {
+        background-color: #f5f5f5 !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  const marketItems = markets.map((market, index) => {
     const marketUrl = `https://kalshi.com/events/${market.event_ticker}/${market.ticker}`;
     
     // Extract series ticker (everything before the first "-")
@@ -198,66 +214,81 @@ function displayMarkets(markets) {
     }
     
     if (priceDisplay === '') {
-      return '';
+      return { html: '', url: '' };
     }
     
-    return `
-      <div class="market-row" style="
-        display: flex; 
-        align-items: center; 
-        padding: 12px; 
-        border-bottom: 1px solid #eee;
-        text-decoration: none;
-        color: inherit;
-      " onclick="window.open('${marketUrl}', '_blank')">
-        <img src="${iconUrl}" 
-             alt="${seriesTicker}" 
-             style="
-               width: 32px; 
-               height: 32px; 
-               margin-right: 12px; 
-               border-radius: 4px;
-               flex-shrink: 0;
-             " 
-             onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"
-        />
-        <div style="
-          width: 32px; 
-          height: 32px; 
-          margin-right: 12px; 
-          background-color: #f0f0f0; 
-          border-radius: 4px; 
-          display: none; 
+    return {
+      html: `
+        <div class="market-row" data-market-index="${index}" style="
+          display: flex; 
           align-items: center; 
-          justify-content: center; 
-          font-size: 12px; 
-          color: #666;
-          flex-shrink: 0;
-        ">?</div>
-        <div style="flex: 1; min-width: 0;">
-          <div style="font-weight: normal; font-size: 13px; line-height: 1.3; margin-bottom: 2px;">
-            ${market.title}
-          </div>
-          ${market.sub_title ? `<div style="font-size: 11px; color: #888; line-height: 1.2; font-family: monospace;">
-            ${market.sub_title}
-          </div>` : ''}
-        </div>
-        <div style="
-          text-align: right; 
-          margin-left: 12px;
-          flex-shrink: 0;
+          padding: 12px; 
+          border-bottom: 1px solid #eee;
+          text-decoration: none;
+          color: inherit;
+          background-color: white;
         ">
-          ${priceDisplay}
+          <img src="${iconUrl}" 
+               alt="${seriesTicker}" 
+               style="
+                 width: 32px; 
+                 height: 32px; 
+                 margin-right: 12px; 
+                 border-radius: 4px;
+                 flex-shrink: 0;
+               " 
+               onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"
+          />
+          <div style="
+            width: 32px; 
+            height: 32px; 
+            margin-right: 12px; 
+            background-color: #f0f0f0; 
+            border-radius: 4px; 
+            display: none; 
+            align-items: center; 
+            justify-content: center; 
+            font-size: 12px; 
+            color: #666;
+            flex-shrink: 0;
+          ">?</div>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: normal; font-size: 13px; line-height: 1.3; margin-bottom: 2px;">
+              ${market.title}
+            </div>
+            ${market.sub_title ? `<div style="font-size: 11px; color: #888; line-height: 1.2; font-family: monospace;">
+              ${market.sub_title}
+            </div>` : ''}
+          </div>
+          <div style="
+            text-align: right; 
+            margin-left: 12px;
+            flex-shrink: 0;
+          ">
+            ${priceDisplay}
+          </div>
         </div>
-      </div>
-    `;
-  }).filter(item => item !== '').join('');
+      `,
+      url: marketUrl
+    };
+  }).filter(item => item.html !== '');
+
+  const marketUrls = marketItems.map(item => item.url);
+  const marketHtml = marketItems.map(item => item.html).join('');
   
   // Update the container to remove list styling
   marketList.style.listStyle = 'none';
   marketList.style.padding = '0';
   marketList.style.margin = '0';
-  marketList.innerHTML = marketItems;
+  marketList.innerHTML = marketHtml;
+
+  // Add click event listeners to each market row
+  const marketRows = marketList.querySelectorAll('.market-row');
+  marketRows.forEach((row, index) => {
+    row.addEventListener('click', () => {
+      window.open(marketUrls[index], '_blank');
+    });
+  });
 }
 
 function displayError(message) {
