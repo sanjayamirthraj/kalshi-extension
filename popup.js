@@ -238,9 +238,9 @@ function displayMarkets(markets) {
           <div style="font-weight: normal; font-size: 13px; line-height: 1.3; margin-bottom: 2px;">
             ${market.title}
           </div>
-          <div style="font-size: 11px; color: #888; line-height: 1.2; font-family: monospace;">
-            ${market.ticker}
-          </div>
+          ${market.sub_title ? `<div style="font-size: 11px; color: #888; line-height: 1.2; font-family: monospace;">
+            ${market.sub_title}
+          </div>` : ''}
         </div>
         <div style="
           text-align: right; 
