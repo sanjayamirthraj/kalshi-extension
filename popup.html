@@ -42,6 +42,8 @@
             color: var(--gray-900);
             line-height: 1.5;
             overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
         }
 
         .header {
@@ -78,8 +80,35 @@
             opacity: 1;
         }
 
+        .footer {
+            margin-top: auto;
+            padding: 12px 4px 3px 4px;
+            flex-shrink: 0;
+        }
+
+        .credits {
+            font-size: 11px;
+            color: var(--gray-500);
+            text-align: center;
+        }
+
+        .credits a {
+            color: var(--kalshi-green);
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.15s ease;
+        }
+
+        .credits a:hover {
+            color: var(--kalshi-green-hover);
+            text-decoration: underline;
+        }
+
         .content {
             padding: 16px 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
         }
 
         .status-bar {
@@ -196,6 +225,9 @@
 
         .markets-container {
             background: var(--white);
+            flex: 1;
+            overflow-y: auto;
+            max-height: 300px;
         }
 
         .markets-title {
@@ -215,6 +247,7 @@
             display: flex;
             flex-direction: column;
             gap: 8px;
+            overflow-y: auto;
         }
 
         .market-item {
@@ -296,7 +329,7 @@
             </svg>
             Kalshi Market Finder
         </h1>
-        <div class="subtitle">Created by <a href="https://twitter.com/sanjayamirthraj" target="_blank">@sanjayamirthraj</a> </div>
+        <div class="subtitle">AI-powered prediction market discovery</div>
     </div>
 
     <div class="content">
@@ -325,12 +358,12 @@
         </div>
 
         <div class="markets-container">
-            <div class="markets-title">
+            <!-- <div class="markets-title">
                 <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M3,13H11V3H3M3,21H11V15H3M13,21H21V11H13M13,3V9H21V3"/>
                 </svg>
                 Related Markets
-            </div>
+            </div> -->
             <ul id="market-list" class="market-list">
                 <li class="market-item">
                     <div class="market-link">
@@ -338,6 +371,10 @@
                     </div>
                 </li>
             </ul>
+        </div>
+        
+        <div class="footer">
+            <div class="credits">Created by <a href="https://twitter.com/sanjayamirthraj" target="_blank">@sanjayamirthraj</a> & <a href="https://twitter.com/pranav_jad" target="_blank">@pranav_jad</a></div>
         </div>
     </div>
 
