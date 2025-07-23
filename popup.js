@@ -143,7 +143,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     const relevantMarkets = similarityResponse.results.results || [];
     
-    statusMessage.textContent = '';
+    statusMessage.style.display = 'none';
     displayMarkets(relevantMarkets);
     
   } catch (error) {
