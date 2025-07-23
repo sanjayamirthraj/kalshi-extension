@@ -1,64 +1,144 @@
 # Kalshi Market Finder Chrome Extension
 
-An AI-powered Chrome extension that finds relevant Kalshi prediction markets based on semantic similarity to the content you're reading.
+AI-powered Chrome extension that finds relevant Kalshi prediction markets based on webpage content using semantic similarity and named entity recognition.
 
 ## Features
 
-- **Semantic Search**: Uses SentenceTransformers embeddings for intelligent market matching
-- **Keyword Extraction**: Shows categorized keywords (1-word, 2-word, 3-word) extracted from articles
-- **Background Processing**: Automatically processes page content when you visit websites
-- **Market Deduplication**: Groups related markets by event ticker to avoid duplicates
-- **Real-time Updates**: Cached results with automatic refresh
+- 🔍 **AI-Powered Search**: Uses advanced NLP models for keyword extraction and semantic similarity
+- 🎯 **Smart Market Matching**: Finds relevant prediction markets based on page content
+- ⚡ **Background Processing**: Pre-processes pages for instant results
 
-## Setup
+## Local Setup
 
-### 1. Install Python Dependencies
+### Prerequisites
+
+- Python 3.8+
+- Chrome browser
+- Git
+
+### 1. Clone the Repository
 
 ```bash
-pip install -r requirements.txt
+git clone <your-repo-url>
+cd kalshi-extension
 ```
 
-### 2. Start the FastAPI Server
+### 2. Set Up the FastAPI Backend
+
+#### Install Python Dependencies
+
+```bash
+pip install fastapi uvicorn requests sentence-transformers transformers torch scikit-learn python-multipart
+```
+
+#### Start the Backend Server
 
 ```bash
 python server.py
 ```
 
-The server will start on `http://localhost:8000` and fetch all Kalshi markets on startup.
+The server will start on `http://localhost:8000`. You should see:
+```
+Server starting on http://localhost:8000
+Models loaded successfully
+```
 
-### 3. Install Chrome Extension
+**Note**: The first run will download AI models (~1GB total), which may take a few minutes.
 
-1. Open Chrome and go to `chrome://extensions/`
-2. Enable "Developer mode" in the top right
-3. Click "Load unpacked" and select this project directory
-4. The extension icon should appear in your browser toolbar
+### 3. Install the Chrome Extension
 
-## Usage
+1. Open Chrome and navigate to `chrome://extensions/`
+2. Enable **Developer mode** (toggle in top-right corner)
+3. Click **"Load unpacked"**
+4. Select the `kalshi-extension` folder
+5. The extension icon should appear in your Chrome toolbar
 
-1. **Start the server**: Make sure `python server.py` is running
-2. **Visit any webpage** with relevant content (news articles, blogs, etc.)
-3. **Click the extension icon** to see:
-   - Extracted keywords organized by word count
-   - Most similar Kalshi markets ranked by AI similarity scores
-   - Market prices and trading information
+### 4. Usage
 
-## How It Works
+1. **Automatic Processing**: Navigate to any webpage - the extension automatically processes content in the background
+2. **View Results**: Click the extension icon to see:
+   - **Named Entities**: Key people, organizations, locations detected
+   - **Related Markets**: Relevant Kalshi prediction markets with similarity scores
+3. **Open Markets**: Click any market to open it on Kalshi
 
-1. **Content Extraction**: Extension extracts text from article titles, descriptions, and main content
-2. **Keyword Analysis**: TF-IDF algorithm identifies important terms and phrases  
-3. **Semantic Search**: FastAPI server uses SentenceTransformers to find semantically similar markets
-4. **Smart Ranking**: Markets are ranked by cosine similarity scores from the AI model
-5. **Deduplication**: Only shows one market per event to avoid duplicate results
+## Architecture
+
+### Backend (`server.py`)
+- **FastAPI server** handling AI processing
+- **Sentence Transformers** for semantic similarity (`paraphrase-multilingual-mpnet-base-v2`)
+- **RoBERTa-Large NER** for entity extraction (`Jean-Baptiste/roberta-large-ner-english`)
+- **Market caching** with 1-hour persistence
+- **GPU acceleration** support
+
+### Frontend Components
+- **`background.js`**: Background processing and API communication
+- **`content.js`**: Page content extraction
+- **`popup.js`**: Extension UI logic
+- **`popup.html`**: Modern UI with shadcn-inspired styling
+- **`manifest.json`**: Extension configuration
+
+### Data Flow
+1. Content script extracts page content
+2. Background script processes content using AI models
+3. Results cached for instant display
+4. Popup shows processed keywords and relevant markets
 
 ## API Endpoints
 
-- `POST /similarity` - Search for similar markets
-- `GET /health` - Check server status
-- `POST /refresh-cache` - Manually refresh market cache
+- `GET /health` - Server health check
+- `POST /keywords` - Extract keywords and entities from text
+- `POST /similarity` - Find similar markets using semantic search
 
-## Technical Stack
+## Configuration
 
-- **Frontend**: Chrome Extension (JavaScript)
-- **Backend**: FastAPI (Python)
-- **AI Model**: SentenceTransformers (`all-MiniLM-L6-v2`)
-- **Data Source**: Kalshi API with pagination support
+### Model Configuration
+Models are automatically downloaded on first run:
+- **Similarity Model**: `paraphrase-multilingual-mpnet-base-v2` (420M parameters)
+- **NER Model**: `Jean-Baptiste/roberta-large-ner-english` (355M parameters)
+
+### Cache Settings
+- **Market Cache**: 1 hour (configurable in `server.py`)
+- **Background Results**: 50 pages max (configurable in `background.js`)
+
+## Development
+
+### Adding New Features
+1. Backend changes: Modify `server.py`
+2. Extension logic: Update `background.js` or `popup.js`
+3. UI changes: Edit `popup.html` for styling
+
+### Debugging
+- Backend logs: Check console where `python server.py` is running
+- Extension logs: Open Chrome DevTools → Console while extension popup is open
+- Background script logs: Go to `chrome://extensions/` → Extension details → Inspect views: background page
+
+## Troubleshooting
+
+### Common Issues
+
+**Extension shows "Server not running" error:**
+- Ensure `python server.py` is running on localhost:8000
+- Check firewall settings
+
+**No markets found:**
+- Verify the page has meaningful content
+- Check if Kalshi API is accessible
+- Look for backend server logs
+
+**Extension not loading:**
+- Refresh the extension at `chrome://extensions/`
+- Check manifest.json syntax
+- Ensure all files are present
+
+### Performance Tips
+- Server downloads models on first run (~1GB)
+- Use GPU if available for faster processing
+- Markets are cached for 1 hour to reduce API calls
+
+## Credits
+
+Created by [@sanjayamirthraj](https://twitter.com/sanjayamirthraj) & [@pranav_jad](https://twitter.com/pranav_jad)
+
+## License
+
+MIT License - See LICENSE file for details
