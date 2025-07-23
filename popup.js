@@ -295,5 +295,4 @@ function displayError(message) {
   const marketList = document.getElementById('market-list');
   const statusMessage = document.getElementById('status-message');
   statusMessage.textContent = '';
-  marketList.innerHTML = `<li style="color: red;">${message}</li>`;
-}
+  marketList.innerHTML = `<li style="color: red;">${message}</li>`;}
