@@ -58,6 +58,7 @@ class MarketResponse(BaseModel):
     no_bid: Optional[int] = None
     no_ask: Optional[int] = None
     last_price: Optional[int] = None
+    previous_price: Optional[int] = None
     volume: Optional[int] = None
     open_interest: Optional[int] = None
 
@@ -430,7 +431,8 @@ async def similarity_search(request: SimilarityRequest):
                     no_ask=market.get("no_ask"),
                     last_price=market.get("last_price"),
                     volume=market.get("volume"),
-                    open_interest=market.get("open_interest")
+                    open_interest=market.get("open_interest"),
+                    previous_price=market.get("previous_price")
                 )
                 results.append(result)
         
