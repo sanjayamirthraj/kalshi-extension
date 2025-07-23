@@ -152,6 +152,7 @@ async function processPageContentInBackground(pageContent) {
     
     // Create query from page content
     const query = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
+    console.log('Armaan this is the Query:', query);
     
     try {
       // Extract keywords in background
@@ -163,7 +164,7 @@ async function processPageContentInBackground(pageContent) {
       // const similarMarkets = await searchSimilarMarkets(query, 10);
       
       // Analyze sentiment in background
-      console.log('hello beast!!');
+      
       console.log('Analyzing sentiment in background...');
       const sentimentResult = await analyzeSentiment(query);
       console.log('Sentiment result:', sentimentResult);

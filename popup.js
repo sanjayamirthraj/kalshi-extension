@@ -78,6 +78,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     marketList.innerHTML = '<li class="market-item"><div class="market-link"><div class="empty-state">Hello Armaan</div></div></li>';
   }
   const statusMessage = document.getElementById('status-message');
+
+  // Get page content
+  let pageContent;
+  try {
+    // Try to get content from the content script
+    pageContent = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: 'getPageContent' }, (result) => {
+        resolve(result);
+      });
+    });
+  } catch (error) {
+    pageContent = null;
+  }
+
+  if (pageContent && pageContent.title && pageContent.content) {
+    const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
+    // Request sentiment analysis from background
+    chrome.runtime.sendMessage(
+      { action: 'analyzeSentiment', text: pageText },
+      (response) => {
+        if (response && response.success && response.result) {
+          const sentiment = response.result.sentiment;
+          const score = response.result.score;
+          if (marketList) {
+            marketList.innerHTML = `<li class="market-item"><div class="market-link"><div class="empty-state">Sentiment: <b>${sentiment}</b><br/>Score: <b>${score}</b></div></div></li>`;
+          }
+        } else {
+          if (marketList) {
+            marketList.innerHTML = `<li class="market-item"><div class="market-link"><div class="empty-state">Sentiment analysis failed.</div></div></li>`;
+          }
+        }
+      }
+    );
+  }
   
   try {
     statusMessage.textContent = 'Getting page content...';
