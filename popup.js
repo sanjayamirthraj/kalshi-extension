@@ -72,47 +72,8 @@ async function getPageContent(tab) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Display a test message in the popup UI
   const marketList = document.getElementById('market-list');
-  if (marketList) {
-    marketList.innerHTML = '<li class="market-item"><div class="market-link"><div class="empty-state">Hello Armaan</div></div></li>';
-  }
   const statusMessage = document.getElementById('status-message');
-
-  // Get page content
-  let pageContent;
-  try {
-    // Try to get content from the content script
-    pageContent = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({ action: 'getPageContent' }, (result) => {
-        resolve(result);
-      });
-    });
-  } catch (error) {
-    pageContent = null;
-  }
-
-  if (pageContent && pageContent.title && pageContent.content) {
-    const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
-    
-    // Show sentiment section
-    const sentimentSection = document.getElementById('sentiment-section');
-    if (sentimentSection) {
-      sentimentSection.style.display = 'block';
-    }
-    
-    // Request sentiment analysis from background
-    chrome.runtime.sendMessage(
-      { action: 'analyzeSentiment', text: pageText },
-      (response) => {
-        if (response && response.success && response.result) {
-          displaySentiment(response.result);
-        } else {
-          displaySentimentError();
-        }
-      }
-    );
-  }
   
   try {
     statusMessage.textContent = 'Getting page content...';
@@ -185,12 +146,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     statusMessage.style.display = 'none';
     displayMarkets(relevantMarkets);
     
-    // Get sentiment analysis and generate recommendations for each market
-    if (pageContent && pageContent.title && pageContent.content) {
-      const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
-      generateMarketRecommendations(pageText, relevantMarkets);
-    }
-    
   } catch (error) {
     console.error('Error in popup:', error);
     displayError(error.message || 'Failed to analyze page content');
@@ -207,6 +162,22 @@ function displayMarkets(markets) {
     return;
   }
   
+  // Add CSS for hover effects
+  if (!document.getElementById('market-hover-styles')) {
+    const style = document.createElement('style');
+    style.id = 'market-hover-styles';
+    style.textContent = `
+      .market-row {
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+      }
+      .market-row:hover {
+        background-color: #f5f5f5 !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
   const marketItems = markets.map((market, index) => {
     const marketUrl = `https://kalshi.com/events/${market.event_ticker}/${market.ticker}`;
     
@@ -214,7 +185,7 @@ function displayMarkets(markets) {
     const seriesTicker = market.ticker.split('-')[0];
     const iconUrl = `https://kalshi.com/_next/image?url=https%3A%2F%2Fd1lvyva3zy5u58.cloudfront.net%2Fseries-images-webp%2F${seriesTicker}.webp%3Fsize%3Dsm&w=256&q=80`;
     
-    // Calculate price display
+    // Calculate price delta and determine colors/icons
     let priceDisplay = '';
     if (market.last_price) {
       const lastPrice = (market.last_price / 100).toFixed(2);
@@ -225,37 +196,38 @@ function displayMarkets(markets) {
         const deltaValue = (delta / 100).toFixed(2);
         
         if (delta > 0) {
+          // Positive delta: green color and up triangle
           deltaDisplay = `<div style="color: #28a745; font-size: 12px; font-weight: bold;">▲ +$${deltaValue}</div>`;
           priceDisplay = `<div style="color: #28a745; font-size: 14px; font-weight: bold;">$${lastPrice}</div>${deltaDisplay}`;
         } else if (delta < 0) {
+          // Negative delta: red color and down triangle
           deltaDisplay = `<div style="color: #dc3545; font-size: 12px; font-weight: bold;">▼ -$${Math.abs(parseFloat(deltaValue)).toFixed(2)}</div>`;
           priceDisplay = `<div style="color: #dc3545; font-size: 14px; font-weight: bold;">$${lastPrice}</div>${deltaDisplay}`;
         } else {
+          // No change: gray color
           priceDisplay = `<div style="color: #6c757d; font-size: 14px; font-weight: bold;">$${lastPrice}</div>`;
         }
       } else {
+        // No previous price available: gray color
         priceDisplay = `<div style="color: #6c757d; font-size: 14px; font-weight: bold;">$${lastPrice}</div>`;
       }
     }
     
     if (priceDisplay === '') {
-      return '';
+      return { html: '', url: '' };
     }
     
-    return `
-      <div class="market-item" style="margin-bottom: 8px;">
-        <div class="market-row" data-market-index="${index}" onclick="window.open('${marketUrl}', '_blank')" style="
+    return {
+      html: `
+        <div class="market-row" data-market-index="${index}" style="
           display: flex; 
           align-items: center; 
           padding: 12px; 
-          border: 1px solid #eee;
-          border-radius: 8px;
+          border-bottom: 1px solid #eee;
           text-decoration: none;
           color: inherit;
           background-color: white;
-          cursor: pointer;
-          transition: all 0.15s ease;
-        " onmouseover="this.style.borderColor='#07C285'; this.style.boxShadow='0 4px 6px -1px rgb(0 0 0 / 0.1)'; this.style.transform='translateY(-1px)'" onmouseout="this.style.borderColor='#eee'; this.style.boxShadow='none'; this.style.transform='translateY(0)'">
+        ">
           <img src="${iconUrl}" 
                alt="${seriesTicker}" 
                style="
@@ -287,10 +259,6 @@ function displayMarkets(markets) {
             ${market.sub_title ? `<div style="font-size: 11px; color: #888; line-height: 1.2; font-family: monospace;">
               ${market.sub_title}
             </div>` : ''}
-            <button class="toggle-recommendation" data-market-index="${index}" id="toggle-${index}">
-              <span class="recommendation-arrow" id="arrow-${index}">▼</span>
-              AI Recommendation
-            </button>
           </div>
           <div style="
             text-align: right; 
@@ -300,33 +268,25 @@ function displayMarkets(markets) {
             ${priceDisplay}
           </div>
         </div>
-        <div class="market-recommendation-dropdown" id="dropdown-${index}">
-          <div class="recommendation-content">
-            <div class="recommendation-header">
-              <div id="recommendation-badge-${index}" class="recommendation-badge recommend-neutral">Loading...</div>
-            </div>
-            <div class="recommendation-text" id="recommendation-text-${index}">
-              Analyzing content for trading insights...
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }).filter(item => item !== '');
+      `,
+      url: marketUrl
+    };
+  }).filter(item => item.html !== '');
 
-  // Update the container
+  const marketUrls = marketItems.map(item => item.url);
+  const marketHtml = marketItems.map(item => item.html).join('');
+  
+  // Update the container to remove list styling
   marketList.style.listStyle = 'none';
   marketList.style.padding = '0';
   marketList.style.margin = '0';
-  marketList.innerHTML = marketItems.join('');
-  
-  // Add event listeners for recommendation toggles
-  const toggleButtons = marketList.querySelectorAll('.toggle-recommendation');
-  toggleButtons.forEach(button => {
-    button.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const marketIndex = button.getAttribute('data-market-index');
-      toggleRecommendation(marketIndex);
+  marketList.innerHTML = marketHtml;
+
+  // Add click event listeners to each market row
+  const marketRows = marketList.querySelectorAll('.market-row');
+  marketRows.forEach((row, index) => {
+    row.addEventListener('click', () => {
+      window.open(marketUrls[index], '_blank');
     });
   });
 }
