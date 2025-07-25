@@ -516,7 +516,7 @@ async def get_signal(request: GetSignalRequest):
         
         # Initialize models
         initialize_models()
-        
+        print("request.article_text: ", request.article_text)
         # Step 1: Split article into sentences
         sentences = split_into_sentences(request.article_text)
         logger.info(f"Split article into {len(sentences)} sentences")

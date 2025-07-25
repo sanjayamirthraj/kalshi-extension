@@ -31,8 +31,8 @@ function extractPageContentScript() {
     mainContent = document.body.innerText;
   }
   
-  // Clean up the content - take first 1000 characters to avoid too much text
-  mainContent = mainContent.replace(/\s+/g, ' ').trim().substring(0, 1000);
+  // Clean up the content
+  mainContent = mainContent.replace(/\s+/g, ' ').trim();
   
   return {
     title,
@@ -115,8 +115,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     statusMessage.textContent = 'Finding similar markets using AI...';
     
-    // Prepare page text for similarity search
-    const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
+    // Prepare page text for similarity search (truncate to 2000 characters)
+    const fullPageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
+    const pageText = fullPageText.substring(0, 2000);
     
     // Use FastAPI server for semantic similarity search
     const similarityResponse = await new Promise((resolve) => {
@@ -185,10 +186,11 @@ async function loadAIAnalysis(index, dropdown, market) {
   }
   
   try {
-    // Prepare article text from page content
+    // Prepare article text from page content (truncate to 10k characters for get_signal)
     let articleText = '';
     if (globalPageContent) {
-      articleText = `${globalPageContent.title} ${globalPageContent.description} ${globalPageContent.content}`.trim();
+      const fullArticleText = `${globalPageContent.title} ${globalPageContent.description} ${globalPageContent.content}`.trim();
+      articleText = fullArticleText.substring(0, 10000);
     }
 
     console.log('articleText: ', articleText);
