@@ -69,6 +69,52 @@ async function extractKeywords(text, maxKeywords = 15) {
   }
 }
 
+// Function to analyze sentiment using FastAPI server
+async function analyzeSentiment(text) {
+  try {
+    console.log('Analyzing sentiment using FastAPI server...');
+    const response = await fetch(`${SIMILARITY_API_URL}/sentiment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    console.log('Sentiment analysis result:', data);
+    return data;
+  } catch (error) {
+    console.error('Error analyzing sentiment:', error);
+    throw error;
+  }
+}
+
+// Function to compare article and market sentiment using FastAPI server
+async function compareSentiment(articleText, yesPrice, noPrice) {
+  try {
+    const response = await fetch(`${SIMILARITY_API_URL}/compare_sentiment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: articleText,
+        market_yes_price: yesPrice,
+        market_no_price: noPrice
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error comparing sentiment:', error);
+    return { error: error.message };
+  }
+}
+
 // Check if FastAPI server is running
 async function checkServerHealth() {
   try {
@@ -82,75 +128,6 @@ async function checkServerHealth() {
   } catch (error) {
     console.error('Server health check failed:', error);
     return false;
-  }
-}
-
-// Function to process page content in background
-async function processPageContentInBackground(pageContent) {
-  try {
-    console.log('Processing page content in background:', pageContent.title);
-    
-    // Check if we already processed this URL recently
-    const cacheKey = pageContent.url;
-    if (pageResultsCache.has(cacheKey)) {
-      console.log('Using cached results for:', pageContent.url);
-      return;
-    }
-    
-    // Check if server is healthy
-    const isServerHealthy = await checkServerHealth();
-    if (!isServerHealthy) {
-      console.warn('FastAPI server is not available, skipping background processing');
-      return;
-    }
-    
-    // Create query from page content
-    const query = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
-    
-    try {
-      // Extract keywords in background
-      console.log('Extracting keywords in background...');
-      const keywordResults = await extractKeywords(query, 15);
-      
-      // Search for similar markets
-      console.log('Searching for similar markets in background...');
-      const similarMarkets = await searchSimilarMarkets(query, 10);
-      
-      // Cache both keyword and similarity results
-      pageResultsCache.set(cacheKey, {
-        pageContent: pageContent,
-        keywords: keywordResults,
-        similarMarkets: similarMarkets,
-        timestamp: Date.now()
-      });
-      
-      console.log('Background processing completed:', {
-        title: pageContent.title,
-        entities: keywordResults.entities?.length || 0,
-        keywords: keywordResults.keywords?.length || 0,
-        markets: similarMarkets.results?.length || 0
-      });
-      
-    } catch (error) {
-      console.error('Error during AI processing:', error);
-      // Still cache the page content for fallback
-      pageResultsCache.set(cacheKey, {
-        pageContent: pageContent,
-        keywords: null,
-        similarMarkets: null,
-        timestamp: Date.now(),
-        error: error.message
-      });
-    }
-    
-    // Limit cache size
-    if (pageResultsCache.size > MAX_CACHE_SIZE) {
-      const firstKey = pageResultsCache.keys().next().value;
-      pageResultsCache.delete(firstKey);
-    }
-    
-  } catch (error) {
-    console.error('Error processing page content in background:', error);
   }
 }
 
@@ -221,5 +198,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         cached: false
       });
     }
+  }
+
+  if (request.action === 'analyzeSentiment') {
+    analyzeSentiment(request.text)
+      .then(result => {
+        sendResponse({ success: true, result });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Indicates async response
+  }
+
+  if (request.action === 'compareSentiment') {
+    compareSentiment(request.text, request.yesPrice, request.noPrice)
+      .then(result => {
+        sendResponse({ success: true, result });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Indicates async response
   }
 });
