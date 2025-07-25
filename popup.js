@@ -162,7 +162,7 @@ function displayMarkets(markets) {
     return;
   }
   
-  // Add CSS for hover effects
+  // Add CSS for hover effects and dropdown functionality
   if (!document.getElementById('market-hover-styles')) {
     const style = document.createElement('style');
     style.id = 'market-hover-styles';
@@ -173,6 +173,43 @@ function displayMarkets(markets) {
       }
       .market-row:hover {
         background-color: #f5f5f5 !important;
+      }
+      .dropdown-arrow {
+        cursor: pointer;
+        transition: transform 0.2s ease;
+        color: #6b7280;
+        font-size: 12px;
+        margin-right: 8px;
+        padding: 4px;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+      }
+      .dropdown-arrow:hover {
+        background-color: #e5e7eb;
+      }
+      .dropdown-arrow.expanded {
+        transform: rotate(90deg);
+      }
+      .market-dropdown {
+        display: none;
+        background: #f9fafb;
+        padding: 12px 16px;
+        font-size: 12px;
+        color: #6b7280;
+        line-height: 1.4;
+        border-bottom: 1px solid #eee;
+      }
+      .market-dropdown.visible {
+        display: block;
+      }
+      .market-main-content {
+        flex: 1;
+        display: flex;
+        align-items: center;
       }
     `;
     document.head.appendChild(style);
@@ -219,53 +256,62 @@ function displayMarkets(markets) {
     
     return {
       html: `
-        <div class="market-row" data-market-index="${index}" style="
-          display: flex; 
-          align-items: center; 
-          padding: 12px; 
-          border-bottom: 1px solid #eee;
-          text-decoration: none;
-          color: inherit;
-          background-color: white;
-        ">
-          <img src="${iconUrl}" 
-               alt="${seriesTicker}" 
-               style="
-                 width: 32px; 
-                 height: 32px; 
-                 margin-right: 12px; 
-                 border-radius: 4px;
-                 flex-shrink: 0;
-               " 
-               onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"
-          />
-          <div style="
-            width: 32px; 
-            height: 32px; 
-            margin-right: 12px; 
-            background-color: #f0f0f0; 
-            border-radius: 4px; 
-            display: none; 
+        <div class="market-container">
+          <div class="market-row" data-market-index="${index}" style="
+            display: flex; 
             align-items: center; 
-            justify-content: center; 
-            font-size: 12px; 
-            color: #666;
-            flex-shrink: 0;
-          ">?</div>
-          <div style="flex: 1; min-width: 0;">
-            <div style="font-weight: normal; font-size: 13px; line-height: 1.3; margin-bottom: 2px;">
-              ${market.title}
-            </div>
-            ${market.sub_title ? `<div style="font-size: 11px; color: #888; line-height: 1.2; font-family: monospace;">
-              ${market.sub_title}
-            </div>` : ''}
-          </div>
-          <div style="
-            text-align: right; 
-            margin-left: 12px;
-            flex-shrink: 0;
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            background-color: white;
+            position: relative;
           ">
-            ${priceDisplay}
+            <div class="dropdown-arrow" data-dropdown-index="${index}">
+              ▶
+            </div>
+            <div class="market-main-content" data-market-url="${marketUrl}">
+              <img src="${iconUrl}" 
+                   alt="${seriesTicker}" 
+                   style="
+                     width: 32px; 
+                     height: 32px; 
+                     margin-right: 12px; 
+                     border-radius: 4px;
+                     flex-shrink: 0;
+                   " 
+                   onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"
+              />
+              <div style="
+                width: 32px; 
+                height: 32px; 
+                margin-right: 12px; 
+                background-color: #f0f0f0; 
+                border-radius: 4px; 
+                display: none; 
+                align-items: center; 
+                justify-content: center; 
+                font-size: 12px; 
+                color: #666;
+                flex-shrink: 0;
+              ">?</div>
+              <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: normal; font-size: 13px; line-height: 1.3; margin-bottom: 2px;">
+                  ${market.title}
+                </div>
+                ${market.sub_title ? `<div style="font-size: 11px; color: #888; line-height: 1.2; font-family: monospace;">
+                  ${market.sub_title}
+                </div>` : ''}
+              </div>
+              <div style="
+                text-align: right; 
+                margin-left: 12px;
+                flex-shrink: 0;
+              ">
+                ${priceDisplay}
+              </div>
+            </div>
+          </div>
+          <div class="market-dropdown" data-dropdown-content="${index}">
+            AI analysis here
           </div>
         </div>
       `,
@@ -282,11 +328,26 @@ function displayMarkets(markets) {
   marketList.style.margin = '0';
   marketList.innerHTML = marketHtml;
 
-  // Add click event listeners to each market row
-  const marketRows = marketList.querySelectorAll('.market-row');
-  marketRows.forEach((row, index) => {
-    row.addEventListener('click', () => {
-      window.open(marketUrls[index], '_blank');
+  // Add click event listeners for dropdown arrows
+  const dropdownArrows = marketList.querySelectorAll('.dropdown-arrow');
+  dropdownArrows.forEach((arrow) => {
+    arrow.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const index = arrow.getAttribute('data-dropdown-index');
+      const dropdown = marketList.querySelector(`[data-dropdown-content="${index}"]`);
+      
+      // Toggle dropdown visibility
+      dropdown.classList.toggle('visible');
+      arrow.classList.toggle('expanded');
+    });
+  });
+
+  // Add click event listeners for market content (excluding dropdown arrow)
+  const marketMainContent = marketList.querySelectorAll('.market-main-content');
+  marketMainContent.forEach((content) => {
+    content.addEventListener('click', () => {
+      const marketUrl = content.getAttribute('data-market-url');
+      window.open(marketUrl, '_blank');
     });
   });
 }
