@@ -189,8 +189,8 @@ async function loadAIAnalysis(index, dropdown, market) {
     // Prepare article text from page content (truncate to 10k characters for get_signal)
     let articleText = '';
     if (globalPageContent) {
-      const fullArticleText = `${globalPageContent.title} ${globalPageContent.description} ${globalPageContent.content}`.trim();
-      articleText = fullArticleText.substring(0, 10000);
+      const fullArticleText = `${globalPageContent.title} ${globalPageContent.description} ${globalPageContent.content}`;
+      articleText = fullArticleText;
     }
 
     console.log('articleText: ', articleText);

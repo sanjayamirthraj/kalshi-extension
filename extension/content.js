@@ -7,8 +7,14 @@ function extractPageContent() {
     const documentClone = document.cloneNode(true);
     
     // Use Readability to extract the main article content
-    const reader = new Readability(documentClone);
+    const reader = new Readability(documentClone, {
+      charThreshold: 100,
+      maxElemsToParse: 0,
+      nbTopCandidates: 10,
+      debug: false,
+    });
     const article = reader.parse();
+    console.log('readability article: ', article);
     
     if (article) {
       // Use Readability's extracted content
@@ -73,27 +79,6 @@ function extractPageContent() {
     url: window.location.href,
     readabilityParsed: false
   };
-}
-
-// Send page content to background script for processing
-function sendPageContentToBackground() {
-  const pageContent = extractPageContent();
-  
-  // Only process if there's meaningful content
-  if (pageContent.title && pageContent.content && pageContent.content.length > 50) {
-    chrome.runtime.sendMessage({
-      action: 'processPageContent',
-      pageContent: pageContent
-    });
-  }
-}
-
-// Process page content when DOM is loaded
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', sendPageContentToBackground);
-} else {
-  // DOM is already loaded
-  sendPageContentToBackground();
 }
 
 // Listen for messages from popup
