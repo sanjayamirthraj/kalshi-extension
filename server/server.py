@@ -43,11 +43,19 @@ def get_sentiment_pipeline():
         sentiment_pipeline = pipeline('sentiment-analysis')
     return sentiment_pipeline
 
-def get_optimism_score(label, score):
-    if label.upper() == 'POSITIVE':
-        return score
-    elif label.upper() == 'NEGATIVE':
-        return 1 - score
+def get_optimism_score(label, score, market_sentiment_label, market_sentiment_score):
+    # if market sentiment is positive then positive sentences are optimistic
+    # if market sentiment is negative then negative sentences are optimistic
+    if market_sentiment_label.upper() == 'POSITIVE':
+        if label.upper() == 'POSITIVE':
+            return score
+        elif label.upper() == 'NEGATIVE':
+            return 1 - score
+    elif market_sentiment_label.upper() == 'NEGATIVE':
+        if label.upper() == 'POSITIVE':
+            return 1 - score
+        elif label.upper() == 'NEGATIVE':
+            return score
     else:
         return 0.5  # Neutral or unknown
 
@@ -66,7 +74,7 @@ def split_into_sentences(text: str) -> List[str]:
     
     return cleaned_sentences
 
-def calculate_signal_score(sentence_analyses: List[SentenceAnalysis]) -> float:
+def calculate_signal_score(sentence_analyses: List[SentenceAnalysis], market_sentiment_label: str, market_sentiment_score: float) -> float:
     """Calculate a signal score 0-100 based on similarity and sentiment of top sentences"""
     if not sentence_analyses:
         return 50.0  # Neutral if no sentences
@@ -79,7 +87,7 @@ def calculate_signal_score(sentence_analyses: List[SentenceAnalysis]) -> float:
         similarity_weight = analysis.similarity_score
         
         # Convert sentiment to optimism score
-        optimism = get_optimism_score(analysis.sentiment_label, analysis.sentiment_score)
+        optimism = get_optimism_score(analysis.sentiment_label, analysis.sentiment_score, market_sentiment_label, market_sentiment_score)
         
         # Calculate weighted contribution
         # High similarity + positive sentiment = high score
@@ -107,7 +115,36 @@ def get_recommendation_from_score(score: float) -> str:
     else:
         return "NEUTRAL"
 
-
+def truncate_text_for_model(text: str, max_chars: int = 2000) -> str:
+    """
+    Truncate text to a safe length for transformer models.
+    Using character-based truncation as a proxy for token limits.
+    Most models have ~512 token limit, and roughly 4 chars per token,
+    so 2000 chars should be well within limits.
+    """
+    if len(text) <= max_chars:
+        return text
+    
+    # Truncate and try to end at a sentence boundary
+    truncated = text[:max_chars]
+    
+    # Find the last sentence ending
+    last_period = truncated.rfind('.')
+    last_exclamation = truncated.rfind('!')
+    last_question = truncated.rfind('?')
+    
+    last_sentence_end = max(last_period, last_exclamation, last_question)
+    
+    # If we found a sentence ending and it's not too early, use it
+    if last_sentence_end > max_chars * 0.7:  # At least 70% of the text
+        return truncated[:last_sentence_end + 1]
+    else:
+        # Otherwise just truncate at word boundary
+        last_space = truncated.rfind(' ')
+        if last_space > max_chars * 0.8:  # At least 80% of the text
+            return truncated[:last_space]
+        else:
+            return truncated
 
 # Initialize the models
 def initialize_models():
@@ -530,11 +567,22 @@ async def get_signal(request: GetSignalRequest):
                 market_text=request.market_text
             )
         
-        # Step 2: Embed each sentence
-        sentence_embeddings = similarity_model.encode(sentences, convert_to_tensor=False)
+        # Step 2: Embed each sentence (truncate each sentence to avoid token limit)
+        truncated_sentences = [truncate_text_for_model(sentence) for sentence in sentences]
         
-        # Step 3: Embed market text
-        market_embedding = similarity_model.encode([request.market_text], convert_to_tensor=False)
+        # Log if any sentences were truncated
+        truncated_count = sum(1 for i, sentence in enumerate(sentences) if len(sentence) != len(truncated_sentences[i]))
+        if truncated_count > 0:
+            logger.info(f"Truncated {truncated_count} out of {len(sentences)} sentences to fit token limit")
+        
+        sentence_embeddings = similarity_model.encode(truncated_sentences, convert_to_tensor=False)
+        
+        # Step 3: Embed market text (truncate to avoid token limit)
+        truncated_market_text = truncate_text_for_model(request.market_text)
+        if len(request.market_text) != len(truncated_market_text):
+            logger.info(f"Truncated market text from {len(request.market_text)} to {len(truncated_market_text)} characters")
+        
+        market_embedding = similarity_model.encode([truncated_market_text], convert_to_tensor=False)
         
         # Step 4: Calculate similarities between each sentence and market text
         similarities = cosine_similarity(sentence_embeddings, market_embedding).flatten()
@@ -548,16 +596,17 @@ async def get_signal(request: GetSignalRequest):
         
         for idx in top_indices:
             if similarities[idx] > 0:  # Only include positive similarities
-                sentence = sentences[idx]
+                sentence = sentences[idx]  # Original sentence for display
+                truncated_sentence = truncated_sentences[idx]  # Truncated for processing
                 similarity_score = float(similarities[idx])
                 
-                # Get sentiment
-                sentiment_result = sentiment_pipe(sentence)
+                # Get sentiment (use truncated version to avoid token limit)
+                sentiment_result = sentiment_pipe(truncated_sentence)
                 sentiment_label = sentiment_result[0]['label']
                 sentiment_score = float(sentiment_result[0]['score'])
                 
                 analysis = SentenceAnalysis(
-                    sentence=sentence,
+                    sentence=sentence,  # Use original sentence for display
                     similarity_score=similarity_score,
                     sentiment_label=sentiment_label,
                     sentiment_score=sentiment_score
@@ -565,9 +614,12 @@ async def get_signal(request: GetSignalRequest):
                 top_sentence_analyses.append(analysis)
                 
                 logger.info(f"Top sentence similarity: {similarity_score:.3f}, sentiment: {sentiment_label} ({sentiment_score:.3f})")
-        
+        # get sentiment of market text
+        market_sentiment_result = sentiment_pipe(request.market_text)
+        market_sentiment_label = market_sentiment_result[0]['label']
+        market_sentiment_score = float(market_sentiment_result[0]['score'])
         # Step 7: Calculate signal score (0-100)
-        signal_score = calculate_signal_score(top_sentence_analyses)
+        signal_score = calculate_signal_score(top_sentence_analyses, market_sentiment_label, market_sentiment_score)
         
         # Step 8: Get recommendation based on score
         recommendation = get_recommendation_from_score(signal_score)

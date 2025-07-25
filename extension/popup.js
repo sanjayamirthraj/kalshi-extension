@@ -194,6 +194,7 @@ async function loadAIAnalysis(index, dropdown, market) {
     }
 
     console.log('articleText: ', articleText);
+    articleText = articleText.substring(0, 20000);
     
     // Prepare market text
     const marketText = `${market.title || ''} ${market.sub_title || ''}`.trim();
@@ -265,7 +266,7 @@ function displayAIAnalysis(dropdown, analysis) {
         ${top_sentences.map(sentence => `
           <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 3px solid ${sentence.sentiment_label === 'POSITIVE' ? '#28a745' : sentence.sentiment_label === 'NEGATIVE' ? '#dc3545' : '#6c757d'};">
             <div style="font-size: 11px; color: #495057; line-height: 1.4; margin-bottom: 4px;">
-              "${sentence.sentence}"
+              "${sentence.sentence.length > 200 ? sentence.sentence.substring(0, 200) + '...' : sentence.sentence}"
             </div>
             <div style="font-size: 10px; color: #6c757d; display: flex; justify-content: space-between;">
               <span>Relevance: ${(sentence.similarity_score * 100).toFixed(1)}%</span>
