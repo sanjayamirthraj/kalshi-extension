@@ -441,6 +441,61 @@
             border: 1px solid var(--gray-300);
         }
 
+        .market-recommendation-dropdown {
+            margin-top: 8px;
+            border-top: 1px solid var(--gray-200);
+            background: var(--gray-50);
+            border-radius: 0 0 8px 8px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .recommendation-content {
+            padding: 12px;
+        }
+
+        .recommendation-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .recommendation-text {
+            font-size: 11px;
+            color: var(--gray-600);
+            line-height: 1.4;
+            background: var(--white);
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid var(--gray-200);
+        }
+
+        .toggle-recommendation {
+            background: none;
+            border: none;
+            color: var(--kalshi-green);
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            padding: 4px 0;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .toggle-recommendation:hover {
+            color: var(--kalshi-green-hover);
+        }
+
+        .recommendation-arrow {
+            transition: transform 0.2s ease;
+        }
+
+        .recommendation-arrow.expanded {
+            transform: rotate(180deg);
+        }
+
         .error-message {
             background: #fef2f2;
             border: 1px solid #fecaca;
@@ -489,19 +544,6 @@
             </div>
         </div>
 
-        <div id="recommendations-section" class="voting-recommendations" style="display: none;">
-            <div class="voting-header">
-                <h3 class="voting-title">
-                    <svg class="icon" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M17.5,12A1.5,1.5 0 0,1 16,10.5A1.5,1.5 0 0,1 17.5,9A1.5,1.5 0 0,1 19,10.5A1.5,1.5 0 0,1 17.5,12M10,10.5C10,11.3 9.3,12 8.5,12C7.7,12 7,11.3 7,10.5C7,9.7 7.7,9 8.5,9C9.3,9 10,9.7 10,10.5M12.5,13.04C10.34,13.04 8.5,14.88 8.5,17.04H16.5C16.5,14.88 14.66,13.04 12.5,13.04Z"/>
-                    </svg>
-                    Voting Recommendations
-                </h3>
-            </div>
-            <div id="recommendations-list">
-                <div class="empty-state">Loading recommendations...</div>
-            </div>
-        </div>
 
         <div class="markets-container">
             <!-- <div class="markets-title">

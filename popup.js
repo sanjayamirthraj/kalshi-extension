@@ -185,10 +185,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     statusMessage.style.display = 'none';
     displayMarkets(relevantMarkets);
     
-    // Get sentiment analysis and generate recommendations
+    // Get sentiment analysis and generate recommendations for each market
     if (pageContent && pageContent.title && pageContent.content) {
       const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
-      generateVotingRecommendations(pageText, relevantMarkets);
+      generateMarketRecommendations(pageText, relevantMarkets);
     }
     
   } catch (error) {
@@ -207,22 +207,6 @@ function displayMarkets(markets) {
     return;
   }
   
-  // Add CSS for hover effects
-  if (!document.getElementById('market-hover-styles')) {
-    const style = document.createElement('style');
-    style.id = 'market-hover-styles';
-    style.textContent = `
-      .market-row {
-        cursor: pointer;
-        transition: background-color 0.2s ease;
-      }
-      .market-row:hover {
-        background-color: #f5f5f5 !important;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-  
   const marketItems = markets.map((market, index) => {
     const marketUrl = `https://kalshi.com/events/${market.event_ticker}/${market.ticker}`;
     
@@ -230,7 +214,7 @@ function displayMarkets(markets) {
     const seriesTicker = market.ticker.split('-')[0];
     const iconUrl = `https://kalshi.com/_next/image?url=https%3A%2F%2Fd1lvyva3zy5u58.cloudfront.net%2Fseries-images-webp%2F${seriesTicker}.webp%3Fsize%3Dsm&w=256&q=80`;
     
-    // Calculate price delta and determine colors/icons
+    // Calculate price display
     let priceDisplay = '';
     if (market.last_price) {
       const lastPrice = (market.last_price / 100).toFixed(2);
@@ -241,38 +225,37 @@ function displayMarkets(markets) {
         const deltaValue = (delta / 100).toFixed(2);
         
         if (delta > 0) {
-          // Positive delta: green color and up triangle
           deltaDisplay = `<div style="color: #28a745; font-size: 12px; font-weight: bold;">▲ +$${deltaValue}</div>`;
           priceDisplay = `<div style="color: #28a745; font-size: 14px; font-weight: bold;">$${lastPrice}</div>${deltaDisplay}`;
         } else if (delta < 0) {
-          // Negative delta: red color and down triangle
           deltaDisplay = `<div style="color: #dc3545; font-size: 12px; font-weight: bold;">▼ -$${Math.abs(parseFloat(deltaValue)).toFixed(2)}</div>`;
           priceDisplay = `<div style="color: #dc3545; font-size: 14px; font-weight: bold;">$${lastPrice}</div>${deltaDisplay}`;
         } else {
-          // No change: gray color
           priceDisplay = `<div style="color: #6c757d; font-size: 14px; font-weight: bold;">$${lastPrice}</div>`;
         }
       } else {
-        // No previous price available: gray color
         priceDisplay = `<div style="color: #6c757d; font-size: 14px; font-weight: bold;">$${lastPrice}</div>`;
       }
     }
     
     if (priceDisplay === '') {
-      return { html: '', url: '' };
+      return '';
     }
     
-    return {
-      html: `
-        <div class="market-row" data-market-index="${index}" style="
+    return `
+      <div class="market-item" style="margin-bottom: 8px;">
+        <div class="market-row" data-market-index="${index}" onclick="window.open('${marketUrl}', '_blank')" style="
           display: flex; 
           align-items: center; 
           padding: 12px; 
-          border-bottom: 1px solid #eee;
+          border: 1px solid #eee;
+          border-radius: 8px;
           text-decoration: none;
           color: inherit;
           background-color: white;
-        ">
+          cursor: pointer;
+          transition: all 0.15s ease;
+        " onmouseover="this.style.borderColor='#07C285'; this.style.boxShadow='0 4px 6px -1px rgb(0 0 0 / 0.1)'; this.style.transform='translateY(-1px)'" onmouseout="this.style.borderColor='#eee'; this.style.boxShadow='none'; this.style.transform='translateY(0)'">
           <img src="${iconUrl}" 
                alt="${seriesTicker}" 
                style="
@@ -304,6 +287,10 @@ function displayMarkets(markets) {
             ${market.sub_title ? `<div style="font-size: 11px; color: #888; line-height: 1.2; font-family: monospace;">
               ${market.sub_title}
             </div>` : ''}
+            <button class="toggle-recommendation" data-market-index="${index}" id="toggle-${index}">
+              <span class="recommendation-arrow" id="arrow-${index}">▼</span>
+              AI Recommendation
+            </button>
           </div>
           <div style="
             text-align: right; 
@@ -313,25 +300,33 @@ function displayMarkets(markets) {
             ${priceDisplay}
           </div>
         </div>
-      `,
-      url: marketUrl
-    };
-  }).filter(item => item.html !== '');
+        <div class="market-recommendation-dropdown" id="dropdown-${index}">
+          <div class="recommendation-content">
+            <div class="recommendation-header">
+              <div id="recommendation-badge-${index}" class="recommendation-badge recommend-neutral">Loading...</div>
+            </div>
+            <div class="recommendation-text" id="recommendation-text-${index}">
+              Analyzing content for trading insights...
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).filter(item => item !== '');
 
-  const marketUrls = marketItems.map(item => item.url);
-  const marketHtml = marketItems.map(item => item.html).join('');
-  
-  // Update the container to remove list styling
+  // Update the container
   marketList.style.listStyle = 'none';
   marketList.style.padding = '0';
   marketList.style.margin = '0';
-  marketList.innerHTML = marketHtml;
-
-  // Add click event listeners to each market row
-  const marketRows = marketList.querySelectorAll('.market-row');
-  marketRows.forEach((row, index) => {
-    row.addEventListener('click', () => {
-      window.open(marketUrls[index], '_blank');
+  marketList.innerHTML = marketItems.join('');
+  
+  // Add event listeners for recommendation toggles
+  const toggleButtons = marketList.querySelectorAll('.toggle-recommendation');
+  toggleButtons.forEach(button => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const marketIndex = button.getAttribute('data-market-index');
+      toggleRecommendation(marketIndex);
     });
   });
 }
@@ -382,156 +377,188 @@ function displaySentimentError() {
   sentimentLabel.innerHTML = '⚠️ Error analyzing sentiment';
 }
 
-function generateVotingRecommendations(pageText, markets) {
+function toggleRecommendation(marketIndex) {
+  const dropdown = document.getElementById(`dropdown-${marketIndex}`);
+  const arrow = document.getElementById(`arrow-${marketIndex}`);
+  
+  if (!dropdown || !arrow) return;
+  
+  if (dropdown.style.display === 'none' || dropdown.style.display === '') {
+    dropdown.style.display = 'block';
+    arrow.classList.add('expanded');
+  } else {
+    dropdown.style.display = 'none';
+    arrow.classList.remove('expanded');
+  }
+}
+
+function generateMarketRecommendations(pageText, markets) {
   if (!markets || markets.length === 0) return;
   
-  const recommendationsSection = document.getElementById('recommendations-section');
-  const recommendationsList = document.getElementById('recommendations-list');
+  // Process each market individually
+  markets.forEach((market, index) => {
+    generateSingleMarketRecommendation(pageText, market, index);
+  });
+}
+
+function generateSingleMarketRecommendation(pageText, market, marketIndex) {
+  // Calculate market prices
+  let yesPrice = 0.5;
+  let noPrice = 0.5;
   
-  if (!recommendationsSection || !recommendationsList) return;
+  if (market.yes_ask !== undefined && market.yes_ask !== null) {
+    yesPrice = market.yes_ask / 100;
+    noPrice = market.no_ask !== undefined && market.no_ask !== null ? market.no_ask / 100 : (1 - yesPrice);
+  } else if (market.last_price !== undefined && market.last_price !== null) {
+    yesPrice = market.last_price / 100;
+    noPrice = 1 - yesPrice;
+  }
   
-  // Show recommendations section
-  recommendationsSection.style.display = 'block';
-  recommendationsList.innerHTML = '<div class="empty-state">Analyzing markets for recommendations...</div>';
-  
-  // Get sentiment for comparison
+  // Get sentiment analysis and comparison
   chrome.runtime.sendMessage(
     { action: 'analyzeSentiment', text: pageText },
     (sentimentResponse) => {
       if (!sentimentResponse || !sentimentResponse.success) {
-        recommendationsList.innerHTML = '<div class="empty-state">Unable to generate recommendations</div>';
+        updateRecommendationDisplay(marketIndex, 'NEUTRAL', 'Unable to analyze content');
         return;
       }
       
-      const sentiment = sentimentResponse.result;
-      const recommendations = [];
-      
-      // Process up to 5 markets for recommendations
-      const marketsToProcess = markets.slice(0, 5);
-      let processedCount = 0;
-      
-      marketsToProcess.forEach((market, index) => {
-        // Calculate market prices
-        let yesPrice = 0.5; // Default neutral
-        let noPrice = 0.5;
-        
-        if (market.yes_ask !== undefined && market.yes_ask !== null) {
-          yesPrice = market.yes_ask / 100;
-          noPrice = market.no_ask !== undefined && market.no_ask !== null ? market.no_ask / 100 : (1 - yesPrice);
-        } else if (market.last_price !== undefined && market.last_price !== null) {
-          yesPrice = market.last_price / 100;
-          noPrice = 1 - yesPrice;
-        }
-        
-        // Use comparison API
-        chrome.runtime.sendMessage(
-          {
-            action: 'compareSentiment',
-            text: pageText,
-            yesPrice: yesPrice,
-            noPrice: noPrice
-          },
-          (comparisonResponse) => {
-            processedCount++;
-            
-            if (comparisonResponse && comparisonResponse.success) {
-              const comparison = comparisonResponse.result;
-              let recommendation = 'NEUTRAL';
-              let confidence = 'LOW';
-              
-              // Determine recommendation based on sentiment vs market optimism
-              const delta = comparison.delta || 0;
-              
-              if (Math.abs(delta) > 0.2) {
-                confidence = 'HIGH';
-              } else if (Math.abs(delta) > 0.1) {
-                confidence = 'MEDIUM';
-              }
-              
-              if (delta > 0.1) {
-                recommendation = 'YES';
-              } else if (delta < -0.1) {
-                recommendation = 'NO';
-              }
-              
-              recommendations.push({
-                market: market,
-                recommendation: recommendation,
-                confidence: confidence,
-                delta: delta,
-                marketUrl: `https://kalshi.com/events/${market.event_ticker}/${market.ticker}`
-              });
-            }
-            
-            // Display recommendations when all are processed
-            if (processedCount === marketsToProcess.length) {
-              displayRecommendations(recommendations);
-            }
+      chrome.runtime.sendMessage(
+        {
+          action: 'compareSentiment',
+          text: pageText,
+          yesPrice: yesPrice,
+          noPrice: noPrice
+        },
+        (comparisonResponse) => {
+          if (!comparisonResponse || !comparisonResponse.success) {
+            updateRecommendationDisplay(marketIndex, 'NEUTRAL', 'Unable to generate recommendation');
+            return;
           }
-        );
-      });
+          
+          const sentiment = sentimentResponse.result;
+          const comparison = comparisonResponse.result;
+          const delta = comparison.delta || 0;
+          
+          let recommendation = 'NEUTRAL';
+          let supportingText = '';
+          
+          if (delta > 0.1) {
+            recommendation = 'YES';
+            supportingText = extractSupportingText(pageText, sentiment, 'positive');
+          } else if (delta < -0.1) {
+            recommendation = 'NO';
+            supportingText = extractSupportingText(pageText, sentiment, 'negative');
+          } else {
+            recommendation = 'NEUTRAL';
+            supportingText = extractSupportingText(pageText, sentiment, 'neutral');
+          }
+          
+          updateRecommendationDisplay(marketIndex, recommendation, supportingText);
+        }
+      );
     }
   );
 }
 
-// Helper function to send comparison message with retry logic
-function sendComparisonMessage(pageText, yesPrice, noPrice, callback) {
-  chrome.runtime.sendMessage(
-    {
-      action: 'sendCompareSentiment',
-      text: pageText,
-      market_yes_price: yesPrice,
-      market_no_price: noPrice
-    },
-    callback
-  );
-}
-
-function displayRecommendations(recommendations) {
-  const recommendationsList = document.getElementById('recommendations-list');
+function extractSupportingText(pageText, sentiment, direction) {
+  // Split text into sentences
+  const sentences = pageText.split(/[.!?]+/).filter(s => s.trim().length > 10);
   
-  if (!recommendationsList || recommendations.length === 0) {
-    if (recommendationsList) {
-      recommendationsList.innerHTML = '<div class="empty-state">No recommendations available</div>';
-    }
-    return;
+  // Keywords that suggest positive/negative sentiment
+  const positiveKeywords = [
+    'success', 'growth', 'increase', 'rising', 'boost', 'improve', 'gain', 'positive', 'upward', 
+    'strengthen', 'advance', 'progress', 'benefit', 'win', 'winning', 'achieve', 'excellent',
+    'strong', 'bullish', 'optimistic', 'favorable', 'good news', 'breakthrough', 'surge', 'climb'
+  ];
+  
+  const negativeKeywords = [
+    'decline', 'fall', 'drop', 'decrease', 'loss', 'fail', 'negative', 'down', 'weak',
+    'struggle', 'crisis', 'problem', 'concern', 'worry', 'risk', 'threat', 'bearish',
+    'pessimistic', 'unfavorable', 'bad news', 'setback', 'crash', 'collapse', 'plunge', 'tumble'
+  ];
+  
+  const neutralKeywords = [
+    'stable', 'steady', 'unchanged', 'maintain', 'continue', 'remain', 'consistent', 'balanced',
+    'neutral', 'mixed', 'uncertain', 'unclear', 'waiting', 'pending', 'monitor', 'watch'
+  ];
+  
+  let targetKeywords;
+  let actionText;
+  
+  if (direction === 'positive') {
+    targetKeywords = positiveKeywords;
+    actionText = 'YES';
+  } else if (direction === 'negative') {
+    targetKeywords = negativeKeywords;
+    actionText = 'NO';
+  } else {
+    targetKeywords = neutralKeywords;
+    actionText = 'HOLD';
   }
   
-  // Sort by confidence and delta magnitude
-  recommendations.sort((a, b) => {
-    const confidenceOrder = { 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1 };
-    if (confidenceOrder[a.confidence] !== confidenceOrder[b.confidence]) {
-      return confidenceOrder[b.confidence] - confidenceOrder[a.confidence];
-    }
-    return Math.abs(b.delta) - Math.abs(a.delta);
+  // Find sentences with relevant keywords
+  const relevantSentences = sentences.filter(sentence => {
+    const lowerSentence = sentence.toLowerCase();
+    return targetKeywords.some(keyword => lowerSentence.includes(keyword));
   });
   
-  const recommendationsHtml = recommendations.map(rec => {
-    let badgeClass = 'recommend-neutral';
-    let badgeText = 'HOLD';
-    
-    if (rec.recommendation === 'YES') {
-      badgeClass = 'recommend-yes';
-      badgeText = 'BUY YES';
-    } else if (rec.recommendation === 'NO') {
-      badgeClass = 'recommend-no';
-      badgeText = 'BUY NO';
+  if (relevantSentences.length > 0) {
+    // Return the first relevant sentence, trimmed to reasonable length
+    let supportingText = relevantSentences[0].trim();
+    if (supportingText.length > 150) {
+      supportingText = supportingText.substring(0, 147) + '...';
     }
     
-    return `
-      <div class="market-recommendation" onclick="window.open('${rec.marketUrl}', '_blank')">
-        <div class="market-info">
-          <div class="market-name">${rec.market.title}</div>
-          <div style="font-size: 10px; color: #666; font-weight: 500;">
-            ${rec.confidence} CONFIDENCE • Δ${(rec.delta * 100).toFixed(1)}%
-          </div>
-        </div>
-        <div class="recommendation-badge ${badgeClass}">
-          ${badgeText}
-        </div>
-      </div>
-    `;
-  }).join('');
+    if (direction === 'positive') {
+      return `"${supportingText}" - This positive development suggests market conditions may favor YES positions.`;
+    } else if (direction === 'negative') {
+      return `"${supportingText}" - This concerning development suggests market conditions may favor NO positions.`;
+    } else {
+      return `"${supportingText}" - This neutral or mixed signal suggests a HOLD position may be most appropriate.`;
+    }
+  }
   
-  recommendationsList.innerHTML = recommendationsHtml;
+  // Enhanced fallback with more specific contextual text
+  if (direction === 'positive') {
+    if (sentiment.sentiment === 'POSITIVE') {
+      return `The content expresses optimism with ${(sentiment.score * 100).toFixed(1)}% confidence. This positive sentiment suggests developments that could drive the market outcome toward YES.`;
+    } else {
+      return 'Despite mixed sentiment, the analysis indicates conditions that may favor a positive market outcome, suggesting YES positions could be beneficial.';
+    }
+  } else if (direction === 'negative') {
+    if (sentiment.sentiment === 'NEGATIVE') {
+      return `The content expresses pessimism with ${(sentiment.score * 100).toFixed(1)}% confidence. This negative sentiment suggests developments that could drive the market outcome toward NO.`;
+    } else {
+      return 'Despite mixed sentiment, the analysis indicates concerning factors that may favor a negative market outcome, suggesting NO positions could be beneficial.';
+    }
+  } else {
+    // Neutral/HOLD case
+    return `The content sentiment (${sentiment.sentiment.toLowerCase()}, ${(sentiment.score * 100).toFixed(1)}% confidence) aligns closely with current market pricing. No strong directional bias detected - holding current positions recommended.`;
+  }
+}
+
+function updateRecommendationDisplay(marketIndex, recommendation, supportingText) {
+  const badge = document.getElementById(`recommendation-badge-${marketIndex}`);
+  const text = document.getElementById(`recommendation-text-${marketIndex}`);
+  
+  if (!badge || !text) return;
+  
+  // Update badge
+  let badgeClass = 'recommend-neutral';
+  let badgeText = 'HOLD';
+  
+  if (recommendation === 'YES') {
+    badgeClass = 'recommend-yes';
+    badgeText = 'BUY YES';
+  } else if (recommendation === 'NO') {
+    badgeClass = 'recommend-no';
+    badgeText = 'BUY NO';
+  }
+  
+  badge.className = `recommendation-badge ${badgeClass}`;
+  badge.textContent = badgeText;
+  
+  // Update supporting text
+  text.textContent = supportingText;
 }
