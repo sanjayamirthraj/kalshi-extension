@@ -143,6 +143,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     const relevantMarkets = similarityResponse.results.results || [];
     
+    // Store page content globally for AI analysis
+    globalPageContent = pageContent;
+    
     statusMessage.style.display = 'none';
     displayMarkets(relevantMarkets);
     
@@ -154,8 +157,144 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 
 
+// Store markets data globally for dropdown analysis
+let globalMarketsData = [];
+let globalPageContent = null;
+
+// Function to load AI analysis for a market dropdown
+async function loadAIAnalysis(index, dropdown, market) {
+  // Show loading state
+  dropdown.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px; color: #6b7280;">
+      <div style="width: 16px; height: 16px; border: 2px solid #e5e7eb; border-top: 2px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+      <span>Analyzing article relevance...</span>
+    </div>
+  `;
+  
+  // Add loading animation CSS if not already present
+  if (!document.getElementById('loading-animation-styles')) {
+    const style = document.createElement('style');
+    style.id = 'loading-animation-styles';
+    style.textContent = `
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  try {
+    // Prepare article text from page content
+    let articleText = '';
+    if (globalPageContent) {
+      articleText = `${globalPageContent.title} ${globalPageContent.description} ${globalPageContent.content}`.trim();
+    }
+    
+    // Prepare market text
+    const marketText = `${market.title || ''} ${market.sub_title || ''}`.trim();
+    
+    // Call mock_get_signal endpoint via background script
+    const response = await new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        {
+          action: 'getMockSignal',
+          articleText: articleText,
+          marketText: marketText
+        },
+        (result) => {
+          if (chrome.runtime.lastError) {
+            console.error('Chrome runtime error:', chrome.runtime.lastError);
+            resolve({ success: false, error: 'Extension communication error' });
+            return;
+          }
+          resolve(result);
+        }
+      );
+    });
+    
+    if (!response.success) {
+      throw new Error(response.error || 'Failed to get AI analysis');
+    }
+    
+    // Format and display results
+    const analysis = response.analysis;
+    displayAIAnalysis(dropdown, analysis);
+    
+  } catch (error) {
+    console.error('Error loading AI analysis:', error);
+    dropdown.innerHTML = `
+      <div style="color: #dc3545; font-size: 12px;">
+        <strong>Error:</strong> ${error.message || 'Failed to load AI analysis'}
+      </div>
+    `;
+  }
+}
+
+// Function to display AI analysis results
+function displayAIAnalysis(dropdown, analysis) {
+  const { recommendation, score, top_sentences } = analysis;
+  
+  // Get recommendation badge color
+  let badgeColor = '#6c757d'; // gray for neutral
+  if (recommendation === 'BUY') {
+    badgeColor = '#28a745'; // green
+  } else if (recommendation === 'SELL') {
+    badgeColor = '#dc3545'; // red
+  }
+  
+  // Build sentences HTML
+  let sentencesHtml = '';
+  if (top_sentences && top_sentences.length > 0) {
+    sentencesHtml = `
+      <div style="margin-top: 12px;">
+        <div style="font-weight: 600; font-size: 12px; color: #374151; margin-bottom: 8px;">
+          Supporting Evidence:
+        </div>
+        ${top_sentences.map(sentence => `
+          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 3px solid ${sentence.sentiment_label === 'POSITIVE' ? '#28a745' : sentence.sentiment_label === 'NEGATIVE' ? '#dc3545' : '#6c757d'};">
+            <div style="font-size: 11px; color: #495057; line-height: 1.4; margin-bottom: 4px;">
+              "${sentence.sentence}"
+            </div>
+            <div style="font-size: 10px; color: #6c757d; display: flex; justify-content: space-between;">
+              <span>Relevance: ${(sentence.similarity_score * 100).toFixed(1)}%</span>
+              <span>${sentence.sentiment_label}: ${(sentence.sentiment_score * 100).toFixed(1)}%</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+  
+  dropdown.innerHTML = `
+    <div>
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="
+            background: ${badgeColor}; 
+            color: white; 
+            padding: 4px 8px; 
+            border-radius: 4px; 
+            font-size: 11px; 
+            font-weight: bold;
+          ">
+            ${recommendation}
+          </div>
+          <div style="font-size: 12px; color: #6b7280;">
+            Confidence: ${score.toFixed(1)}%
+          </div>
+        </div>
+      </div>
+      ${sentencesHtml}
+    </div>
+  `;
+}
+
 function displayMarkets(markets) {
   const marketList = document.getElementById('market-list');
+  
+  // Store markets data for dropdown functionality
+  globalMarketsData = markets;
   
   if (markets.length === 0) {
     marketList.innerHTML = '<li>No related markets found</li>';
@@ -331,14 +470,20 @@ function displayMarkets(markets) {
   // Add click event listeners for dropdown arrows
   const dropdownArrows = marketList.querySelectorAll('.dropdown-arrow');
   dropdownArrows.forEach((arrow) => {
-    arrow.addEventListener('click', (e) => {
+    arrow.addEventListener('click', async (e) => {
       e.stopPropagation();
       const index = arrow.getAttribute('data-dropdown-index');
       const dropdown = marketList.querySelector(`[data-dropdown-content="${index}"]`);
       
       // Toggle dropdown visibility
+      const wasVisible = dropdown.classList.contains('visible');
       dropdown.classList.toggle('visible');
       arrow.classList.toggle('expanded');
+      
+      // If dropdown is now visible and doesn't have analysis yet, fetch it
+      if (!wasVisible && dropdown.classList.contains('visible')) {
+        await loadAIAnalysis(index, dropdown, globalMarketsData[index]);
+      }
     });
   });
 

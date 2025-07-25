@@ -16,6 +16,7 @@ import json
 import os
 import pickle
 from datetime import datetime
+from models import *
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -106,56 +107,7 @@ def get_recommendation_from_score(score: float) -> str:
     else:
         return "NEUTRAL"
 
-# Pydantic models
-class SimilarityRequest(BaseModel):
-    query: str
-    max_results: int = 10
 
-class KeywordRequest(BaseModel):
-    text: str
-    max_keywords: int = 15
-
-class KeywordResponse(BaseModel):
-    entities: List[Dict[str, Any]]
-    keywords: List[Dict[str, Any]]  # Additional keywords from text analysis
-
-class GetSignalRequest(BaseModel):
-    article_text: str
-    market_text: str
-
-class SentenceAnalysis(BaseModel):
-    sentence: str
-    similarity_score: float
-    sentiment_label: str
-    sentiment_score: float
-
-class GetSignalResponse(BaseModel):
-    recommendation: str  # BUY, SELL, NEUTRAL
-    score: float  # 0-100
-    top_sentences: List[SentenceAnalysis]
-    market_text: str
-
-class MarketResponse(BaseModel):
-    ticker: str
-    event_ticker: str
-    title: str
-    subtitle: Optional[str] = None
-    similarity_score: float
-    market_type: str
-    status: str
-    yes_bid: Optional[int] = None
-    yes_ask: Optional[int] = None
-    no_bid: Optional[int] = None
-    no_ask: Optional[int] = None
-    last_price: Optional[int] = None
-    previous_price: Optional[int] = None
-    volume: Optional[int] = None
-    open_interest: Optional[int] = None
-
-class SimilarityResponse(BaseModel):
-    query: str
-    results: List[MarketResponse]
-    total_markets_searched: int
 
 # Initialize the models
 def initialize_models():
@@ -632,6 +584,45 @@ async def get_signal(request: GetSignalRequest):
     except Exception as e:
         logger.error(f"Error in get_signal: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/mock_get_signal", response_model=GetSignalResponse)
+async def mock_get_signal(request: GetSignalRequest):
+    """Mock version of get_signal endpoint for frontend development and testing"""
+    
+    logger.info(f"Mock signal analysis for article length: {len(request.article_text)}, market text length: {len(request.market_text)}")
+    
+    # Create mock sentence analyses with realistic data
+    mock_sentences = [
+        SentenceAnalysis(
+            sentence="The company reported strong quarterly earnings that exceeded analyst expectations by 15%.",
+            similarity_score=0.87,
+            sentiment_label="POSITIVE",
+            sentiment_score=0.92
+        ),
+        SentenceAnalysis(
+            sentence="Market conditions remain favorable with increased consumer demand and positive economic indicators.",
+            similarity_score=0.73,
+            sentiment_label="POSITIVE",
+            sentiment_score=0.85
+        ),
+        SentenceAnalysis(
+            sentence="However, some analysts express concerns about potential regulatory challenges in the coming quarter.",
+            similarity_score=0.61,
+            sentiment_label="NEGATIVE",
+            sentiment_score=0.78
+        )
+    ]
+    
+    # Mock score calculation (realistic based on the mock data above)
+    mock_score = 74.5
+    mock_recommendation = "BUY"
+    
+    return GetSignalResponse(
+        recommendation=mock_recommendation,
+        score=mock_score,
+        top_sentences=mock_sentences,
+        market_text=request.market_text
+    )
 
 @app.post("/refresh-cache")
 async def refresh_cache():

@@ -115,6 +115,36 @@ async function compareSentiment(articleText, yesPrice, noPrice) {
   }
 }
 
+// Function to get mock signal analysis using FastAPI server
+async function getMockSignal(articleText, marketText) {
+  try {
+    console.log('Getting mock signal analysis from FastAPI server...');
+    
+    const response = await fetch(`${SIMILARITY_API_URL}/mock_get_signal`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        article_text: articleText,
+        market_text: marketText
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('Mock signal analysis result:', data);
+    
+    return data;
+  } catch (error) {
+    console.error('Error getting mock signal:', error);
+    throw error;
+  }
+}
+
 // Check if FastAPI server is running
 async function checkServerHealth() {
   try {
@@ -215,6 +245,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     compareSentiment(request.text, request.yesPrice, request.noPrice)
       .then(result => {
         sendResponse({ success: true, result });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Indicates async response
+  }
+
+  if (request.action === 'getMockSignal') {
+    getMockSignal(request.articleText, request.marketText)
+      .then(analysis => {
+        sendResponse({ success: true, analysis });
       })
       .catch(error => {
         sendResponse({ success: false, error: error.message });
