@@ -50,6 +50,62 @@ def get_optimism_score(label, score):
     else:
         return 0.5  # Neutral or unknown
 
+def split_into_sentences(text: str) -> List[str]:
+    """Split text into sentences using regex"""
+    # Use regex to split on sentence endings, but be more careful about abbreviations
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+    
+    # Clean and filter sentences
+    cleaned_sentences = []
+    for sentence in sentences:
+        sentence = sentence.strip()
+        # Only keep sentences that are substantial (more than 10 characters and have meaningful content)
+        if len(sentence) > 10 and not sentence.isspace():
+            cleaned_sentences.append(sentence)
+    
+    return cleaned_sentences
+
+def calculate_signal_score(sentence_analyses: List[SentenceAnalysis]) -> float:
+    """Calculate a signal score 0-100 based on similarity and sentiment of top sentences"""
+    if not sentence_analyses:
+        return 50.0  # Neutral if no sentences
+    
+    total_score = 0.0
+    weight_sum = 0.0
+    
+    for analysis in sentence_analyses:
+        # Weight by similarity (higher similarity = more important)
+        similarity_weight = analysis.similarity_score
+        
+        # Convert sentiment to optimism score
+        optimism = get_optimism_score(analysis.sentiment_label, analysis.sentiment_score)
+        
+        # Calculate weighted contribution
+        # High similarity + positive sentiment = high score
+        # Low similarity or negative sentiment = low score
+        contribution = similarity_weight * optimism * 100
+        
+        total_score += contribution * similarity_weight
+        weight_sum += similarity_weight
+    
+    # Calculate weighted average
+    if weight_sum > 0:
+        final_score = total_score / weight_sum
+    else:
+        final_score = 50.0
+    
+    # Ensure score is between 0 and 100
+    return max(0.0, min(100.0, final_score))
+
+def get_recommendation_from_score(score: float) -> str:
+    """Convert score to BUY/NEUTRAL/SELL recommendation"""
+    if score >= 70:
+        return "BUY"
+    elif score <= 30:
+        return "SELL"
+    else:
+        return "NEUTRAL"
+
 # Pydantic models
 class SimilarityRequest(BaseModel):
     query: str
@@ -62,6 +118,22 @@ class KeywordRequest(BaseModel):
 class KeywordResponse(BaseModel):
     entities: List[Dict[str, Any]]
     keywords: List[Dict[str, Any]]  # Additional keywords from text analysis
+
+class GetSignalRequest(BaseModel):
+    article_text: str
+    market_text: str
+
+class SentenceAnalysis(BaseModel):
+    sentence: str
+    similarity_score: float
+    sentiment_label: str
+    sentiment_score: float
+
+class GetSignalResponse(BaseModel):
+    recommendation: str  # BUY, SELL, NEUTRAL
+    score: float  # 0-100
+    top_sentences: List[SentenceAnalysis]
+    market_text: str
 
 class MarketResponse(BaseModel):
     ticker: str
@@ -481,6 +553,84 @@ async def extract_keywords(request: KeywordRequest):
         
     except Exception as e:
         logger.error(f"Error in keyword extraction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/get_signal", response_model=GetSignalResponse)
+async def get_signal(request: GetSignalRequest):
+    """Analyze article text against market text to provide trading signal"""
+    
+    try:
+        logger.info(f"Getting signal for article length: {len(request.article_text)}, market text length: {len(request.market_text)}")
+        
+        # Initialize models
+        initialize_models()
+        
+        # Step 1: Split article into sentences
+        sentences = split_into_sentences(request.article_text)
+        logger.info(f"Split article into {len(sentences)} sentences")
+        
+        if not sentences:
+            logger.warning("No sentences found in article")
+            return GetSignalResponse(
+                recommendation="NEUTRAL",
+                score=50.0,
+                top_sentences=[],
+                market_text=request.market_text
+            )
+        
+        # Step 2: Embed each sentence
+        sentence_embeddings = similarity_model.encode(sentences, convert_to_tensor=False)
+        
+        # Step 3: Embed market text
+        market_embedding = similarity_model.encode([request.market_text], convert_to_tensor=False)
+        
+        # Step 4: Calculate similarities between each sentence and market text
+        similarities = cosine_similarity(sentence_embeddings, market_embedding).flatten()
+        
+        # Step 5: Get top 3 sentences by similarity
+        top_indices = np.argsort(similarities)[::-1][:3]
+        
+        # Step 6: Analyze sentiment of top sentences
+        sentiment_pipe = get_sentiment_pipeline()
+        top_sentence_analyses = []
+        
+        for idx in top_indices:
+            if similarities[idx] > 0:  # Only include positive similarities
+                sentence = sentences[idx]
+                similarity_score = float(similarities[idx])
+                
+                # Get sentiment
+                sentiment_result = sentiment_pipe(sentence)
+                sentiment_label = sentiment_result[0]['label']
+                sentiment_score = float(sentiment_result[0]['score'])
+                
+                analysis = SentenceAnalysis(
+                    sentence=sentence,
+                    similarity_score=similarity_score,
+                    sentiment_label=sentiment_label,
+                    sentiment_score=sentiment_score
+                )
+                top_sentence_analyses.append(analysis)
+                
+                logger.info(f"Top sentence similarity: {similarity_score:.3f}, sentiment: {sentiment_label} ({sentiment_score:.3f})")
+        
+        # Step 7: Calculate signal score (0-100)
+        signal_score = calculate_signal_score(top_sentence_analyses)
+        
+        # Step 8: Get recommendation based on score
+        recommendation = get_recommendation_from_score(signal_score)
+        
+        logger.info(f"Signal analysis complete. Score: {signal_score:.1f}, Recommendation: {recommendation}")
+        
+        return GetSignalResponse(
+            recommendation=recommendation,
+            score=signal_score,
+            top_sentences=top_sentence_analyses,
+            market_text=request.market_text
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in get_signal: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/refresh-cache")
