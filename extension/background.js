@@ -115,6 +115,48 @@ async function compareSentiment(articleText, yesPrice, noPrice) {
   }
 }
 
+// Function to get real signal analysis using FastAPI server
+async function getSignal(articleText, marketText) {
+  try {
+    console.log('Getting signal analysis from FastAPI server...', {
+      url: `${SIMILARITY_API_URL}/get_signal`,
+      articleTextLength: articleText?.length,
+      marketTextLength: marketText?.length
+    });
+    
+    const requestBody = {
+      article_text: articleText,
+      market_text: marketText
+    };
+    console.log('Request body:', requestBody);
+    
+    const response = await fetch(`${SIMILARITY_API_URL}/get_signal`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    console.log('Fetch response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('HTTP error response:', errorText);
+      throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log('Signal analysis result:', data);
+    
+    return data;
+  } catch (error) {
+    console.error('Error getting signal:', error);
+    console.error('Error stack:', error.stack);
+    throw error;
+  }
+}
+
 // Function to get mock signal analysis using FastAPI server
 async function getMockSignal(articleText, marketText) {
   try {
@@ -247,6 +289,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true, result });
       })
       .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Indicates async response
+  }
+
+  if (request.action === 'getSignal') {
+    console.log('Background script received getSignal message', {
+      articleTextLength: request.articleText?.length,
+      marketTextLength: request.marketText?.length
+    });
+    
+    getSignal(request.articleText, request.marketText)
+      .then(analysis => {
+        console.log('Background script getSignal success', analysis);
+        sendResponse({ success: true, analysis });
+      })
+      .catch(error => {
+        console.error('Background script getSignal error', error);
         sendResponse({ success: false, error: error.message });
       });
     return true; // Indicates async response

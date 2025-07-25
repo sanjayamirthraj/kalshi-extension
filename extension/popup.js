@@ -190,24 +190,33 @@ async function loadAIAnalysis(index, dropdown, market) {
     if (globalPageContent) {
       articleText = `${globalPageContent.title} ${globalPageContent.description} ${globalPageContent.content}`.trim();
     }
+
+    console.log('articleText: ', articleText);
     
     // Prepare market text
     const marketText = `${market.title || ''} ${market.sub_title || ''}`.trim();
     
-    // Call mock_get_signal endpoint via background script
+    // Call get_signal endpoint via background script
+    console.log('Popup sending getSignal message', {
+      articleTextLength: articleText?.length,
+      marketTextLength: marketText?.length
+    });
+    
     const response = await new Promise((resolve) => {
       chrome.runtime.sendMessage(
         {
-          action: 'getMockSignal',
+          action: 'getSignal',
           articleText: articleText,
           marketText: marketText
         },
         (result) => {
           if (chrome.runtime.lastError) {
             console.error('Chrome runtime error:', chrome.runtime.lastError);
+            console.error('Full error details:', chrome.runtime.lastError.message);
             resolve({ success: false, error: 'Extension communication error' });
             return;
           }
+          console.log('Popup received getSignal response', result);
           resolve(result);
         }
       );
