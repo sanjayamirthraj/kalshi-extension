@@ -169,30 +169,14 @@ async function processPageContentInBackground(pageContent) {
       const sentimentResult = await analyzeSentiment(query);
       console.log('Sentiment result:', sentimentResult);
       
-      // For each relevant market, compare sentiment
-      const sentimentComparisons = await Promise.all((similarMarkets.results || []).map(async (market) => {
-        // Prefer yes_ask/no_ask, fallback to last_price
-        let yesPriceCents = market.yes_ask !== undefined && market.yes_ask !== null ? market.yes_ask : market.last_price;
-        let noPriceCents = market.no_ask !== undefined && market.no_ask !== null ? market.no_ask : (100 - (market.last_price || 0));
-        // Normalize to 0-1
-        const yesPrice = yesPriceCents / 100;
-        const noPrice = noPriceCents / 100;
-        const comparison = await compareSentiment(query, yesPrice, noPrice);
-        return {
-          market_ticker: market.ticker,
-          market_event_ticker: market.event_ticker,
-          market_title: market.title,
-          yes_price: yesPrice,
-          no_price: noPrice,
-          sentiment_comparison: comparison
-        };
-      }));
+      // For each relevant market, compare sentiment - placeholder for now since similarMarkets is commented out
+      const sentimentComparisons = [];
       
       // Cache all results
       pageResultsCache.set(cacheKey, {
         pageContent: pageContent,
-        keywords: keywordResults,
-        similarMarkets: similarMarkets,
+        keywords: null, // keywordResults commented out
+        similarMarkets: null, // similarMarkets commented out
         sentiment: sentimentResult,
         sentimentComparisons: sentimentComparisons,
         timestamp: Date.now()
@@ -200,9 +184,6 @@ async function processPageContentInBackground(pageContent) {
       
       console.log('Background processing completed:', {
         title: pageContent.title,
-        entities: keywordResults.entities?.length || 0,
-        keywords: keywordResults.keywords?.length || 0,
-        markets: similarMarkets.results?.length || 0,
         sentiment: sentimentResult?.sentiment || 'none',
         sentimentComparisons: sentimentComparisons.length
       });
@@ -301,6 +282,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'analyzeSentiment') {
     analyzeSentiment(request.text)
+      .then(result => {
+        sendResponse({ success: true, result });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Indicates async response
+  }
+
+  if (request.action === 'compareSentiment') {
+    compareSentiment(request.text, request.yesPrice, request.noPrice)
       .then(result => {
         sendResponse({ success: true, result });
       })

@@ -94,20 +94,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (pageContent && pageContent.title && pageContent.content) {
     const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
+    
+    // Show sentiment section
+    const sentimentSection = document.getElementById('sentiment-section');
+    if (sentimentSection) {
+      sentimentSection.style.display = 'block';
+    }
+    
     // Request sentiment analysis from background
     chrome.runtime.sendMessage(
       { action: 'analyzeSentiment', text: pageText },
       (response) => {
         if (response && response.success && response.result) {
-          const sentiment = response.result.sentiment;
-          const score = response.result.score;
-          if (marketList) {
-            marketList.innerHTML = `<li class="market-item"><div class="market-link"><div class="empty-state">Sentiment: <b>${sentiment}</b><br/>Score: <b>${score}</b></div></div></li>`;
-          }
+          displaySentiment(response.result);
         } else {
-          if (marketList) {
-            marketList.innerHTML = `<li class="market-item"><div class="market-link"><div class="empty-state">Sentiment analysis failed.</div></div></li>`;
-          }
+          displaySentimentError();
         }
       }
     );
@@ -183,6 +184,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     statusMessage.style.display = 'none';
     displayMarkets(relevantMarkets);
+    
+    // Get sentiment analysis and generate recommendations
+    if (pageContent && pageContent.title && pageContent.content) {
+      const pageText = `${pageContent.title} ${pageContent.description} ${pageContent.content}`.trim();
+      generateVotingRecommendations(pageText, relevantMarkets);
+    }
     
   } catch (error) {
     console.error('Error in popup:', error);
@@ -334,4 +341,197 @@ function displayError(message) {
   const statusMessage = document.getElementById('status-message');
   statusMessage.textContent = '';
   marketList.innerHTML = `<li style="color: red;">${message}</li>`;
+}
+
+function displaySentiment(sentimentResult) {
+  const sentimentScore = document.getElementById('sentiment-score');
+  const sentimentLabel = document.getElementById('sentiment-label');
+  
+  if (!sentimentScore || !sentimentLabel) return;
+  
+  const sentiment = sentimentResult.sentiment;
+  const score = sentimentResult.score;
+  
+  // Determine sentiment class and icon
+  let sentimentClass = 'sentiment-neutral';
+  let icon = '😐';
+  let displayText = 'NEUTRAL';
+  
+  if (sentiment === 'POSITIVE') {
+    sentimentClass = 'sentiment-positive';
+    icon = '😊';
+    displayText = 'POSITIVE';
+  } else if (sentiment === 'NEGATIVE') {
+    sentimentClass = 'sentiment-negative';
+    icon = '😞';
+    displayText = 'NEGATIVE';
+  }
+  
+  // Update the display
+  sentimentScore.className = `sentiment-score ${sentimentClass}`;
+  sentimentLabel.innerHTML = `${icon} ${displayText} (${(score * 100).toFixed(1)}%)`;
+}
+
+function displaySentimentError() {
+  const sentimentScore = document.getElementById('sentiment-score');
+  const sentimentLabel = document.getElementById('sentiment-label');
+  
+  if (!sentimentScore || !sentimentLabel) return;
+  
+  sentimentScore.className = 'sentiment-score sentiment-neutral';
+  sentimentLabel.innerHTML = '⚠️ Error analyzing sentiment';
+}
+
+function generateVotingRecommendations(pageText, markets) {
+  if (!markets || markets.length === 0) return;
+  
+  const recommendationsSection = document.getElementById('recommendations-section');
+  const recommendationsList = document.getElementById('recommendations-list');
+  
+  if (!recommendationsSection || !recommendationsList) return;
+  
+  // Show recommendations section
+  recommendationsSection.style.display = 'block';
+  recommendationsList.innerHTML = '<div class="empty-state">Analyzing markets for recommendations...</div>';
+  
+  // Get sentiment for comparison
+  chrome.runtime.sendMessage(
+    { action: 'analyzeSentiment', text: pageText },
+    (sentimentResponse) => {
+      if (!sentimentResponse || !sentimentResponse.success) {
+        recommendationsList.innerHTML = '<div class="empty-state">Unable to generate recommendations</div>';
+        return;
+      }
+      
+      const sentiment = sentimentResponse.result;
+      const recommendations = [];
+      
+      // Process up to 5 markets for recommendations
+      const marketsToProcess = markets.slice(0, 5);
+      let processedCount = 0;
+      
+      marketsToProcess.forEach((market, index) => {
+        // Calculate market prices
+        let yesPrice = 0.5; // Default neutral
+        let noPrice = 0.5;
+        
+        if (market.yes_ask !== undefined && market.yes_ask !== null) {
+          yesPrice = market.yes_ask / 100;
+          noPrice = market.no_ask !== undefined && market.no_ask !== null ? market.no_ask / 100 : (1 - yesPrice);
+        } else if (market.last_price !== undefined && market.last_price !== null) {
+          yesPrice = market.last_price / 100;
+          noPrice = 1 - yesPrice;
+        }
+        
+        // Use comparison API
+        chrome.runtime.sendMessage(
+          {
+            action: 'compareSentiment',
+            text: pageText,
+            yesPrice: yesPrice,
+            noPrice: noPrice
+          },
+          (comparisonResponse) => {
+            processedCount++;
+            
+            if (comparisonResponse && comparisonResponse.success) {
+              const comparison = comparisonResponse.result;
+              let recommendation = 'NEUTRAL';
+              let confidence = 'LOW';
+              
+              // Determine recommendation based on sentiment vs market optimism
+              const delta = comparison.delta || 0;
+              
+              if (Math.abs(delta) > 0.2) {
+                confidence = 'HIGH';
+              } else if (Math.abs(delta) > 0.1) {
+                confidence = 'MEDIUM';
+              }
+              
+              if (delta > 0.1) {
+                recommendation = 'YES';
+              } else if (delta < -0.1) {
+                recommendation = 'NO';
+              }
+              
+              recommendations.push({
+                market: market,
+                recommendation: recommendation,
+                confidence: confidence,
+                delta: delta,
+                marketUrl: `https://kalshi.com/events/${market.event_ticker}/${market.ticker}`
+              });
+            }
+            
+            // Display recommendations when all are processed
+            if (processedCount === marketsToProcess.length) {
+              displayRecommendations(recommendations);
+            }
+          }
+        );
+      });
+    }
+  );
+}
+
+// Helper function to send comparison message with retry logic
+function sendComparisonMessage(pageText, yesPrice, noPrice, callback) {
+  chrome.runtime.sendMessage(
+    {
+      action: 'sendCompareSentiment',
+      text: pageText,
+      market_yes_price: yesPrice,
+      market_no_price: noPrice
+    },
+    callback
+  );
+}
+
+function displayRecommendations(recommendations) {
+  const recommendationsList = document.getElementById('recommendations-list');
+  
+  if (!recommendationsList || recommendations.length === 0) {
+    if (recommendationsList) {
+      recommendationsList.innerHTML = '<div class="empty-state">No recommendations available</div>';
+    }
+    return;
+  }
+  
+  // Sort by confidence and delta magnitude
+  recommendations.sort((a, b) => {
+    const confidenceOrder = { 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1 };
+    if (confidenceOrder[a.confidence] !== confidenceOrder[b.confidence]) {
+      return confidenceOrder[b.confidence] - confidenceOrder[a.confidence];
+    }
+    return Math.abs(b.delta) - Math.abs(a.delta);
+  });
+  
+  const recommendationsHtml = recommendations.map(rec => {
+    let badgeClass = 'recommend-neutral';
+    let badgeText = 'HOLD';
+    
+    if (rec.recommendation === 'YES') {
+      badgeClass = 'recommend-yes';
+      badgeText = 'BUY YES';
+    } else if (rec.recommendation === 'NO') {
+      badgeClass = 'recommend-no';
+      badgeText = 'BUY NO';
+    }
+    
+    return `
+      <div class="market-recommendation" onclick="window.open('${rec.marketUrl}', '_blank')">
+        <div class="market-info">
+          <div class="market-name">${rec.market.title}</div>
+          <div style="font-size: 10px; color: #666; font-weight: 500;">
+            ${rec.confidence} CONFIDENCE • Δ${(rec.delta * 100).toFixed(1)}%
+          </div>
+        </div>
+        <div class="recommendation-badge ${badgeClass}">
+          ${badgeText}
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  recommendationsList.innerHTML = recommendationsHtml;
 }
