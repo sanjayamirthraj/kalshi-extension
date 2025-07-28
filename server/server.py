@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import httpx
@@ -15,6 +16,7 @@ import json
 import os
 import pickle
 from datetime import datetime
+from models import *
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -32,40 +34,117 @@ last_cache_update = 0
 CACHE_DURATION = 3600  # 1 hour in seconds (3600 seconds)
 CACHE_FILE = "kalshi_markets_cache.pkl"
 
-# Pydantic models
-class SimilarityRequest(BaseModel):
-    query: str
-    max_results: int = 10
+# Global sentiment analysis pipeline
+sentiment_pipeline = None
 
-class KeywordRequest(BaseModel):
-    text: str
-    max_keywords: int = 15
+def get_sentiment_pipeline():
+    global sentiment_pipeline
+    if sentiment_pipeline is None:
+        sentiment_pipeline = pipeline('sentiment-analysis')
+    return sentiment_pipeline
 
-class KeywordResponse(BaseModel):
-    entities: List[Dict[str, Any]]
-    keywords: List[Dict[str, Any]]  # Additional keywords from text analysis
+def get_optimism_score(label, score, market_sentiment_label, market_sentiment_score):
+    # if market sentiment is positive then positive sentences are optimistic
+    # if market sentiment is negative then negative sentences are optimistic
+    if market_sentiment_label.upper() == 'POSITIVE':
+        if label.upper() == 'POSITIVE':
+            return score
+        elif label.upper() == 'NEGATIVE':
+            return 1 - score
+    elif market_sentiment_label.upper() == 'NEGATIVE':
+        if label.upper() == 'POSITIVE':
+            return 1 - score
+        elif label.upper() == 'NEGATIVE':
+            return score
+    else:
+        return 0.5  # Neutral or unknown
 
-class MarketResponse(BaseModel):
-    ticker: str
-    event_ticker: str
-    title: str
-    subtitle: Optional[str] = None
-    similarity_score: float
-    market_type: str
-    status: str
-    yes_bid: Optional[int] = None
-    yes_ask: Optional[int] = None
-    no_bid: Optional[int] = None
-    no_ask: Optional[int] = None
-    last_price: Optional[int] = None
-    previous_price: Optional[int] = None
-    volume: Optional[int] = None
-    open_interest: Optional[int] = None
+def split_into_sentences(text: str) -> List[str]:
+    """Split text into sentences using regex"""
+    # Use regex to split on sentence endings, but be more careful about abbreviations
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+    
+    # Clean and filter sentences
+    cleaned_sentences = []
+    for sentence in sentences:
+        sentence = sentence.strip()
+        # Only keep sentences that are substantial (more than 10 characters and have meaningful content)
+        if len(sentence) > 10 and not sentence.isspace():
+            cleaned_sentences.append(sentence)
+    
+    return cleaned_sentences
 
-class SimilarityResponse(BaseModel):
-    query: str
-    results: List[MarketResponse]
-    total_markets_searched: int
+def calculate_signal_score(sentence_analyses: List[SentenceAnalysis], market_sentiment_label: str, market_sentiment_score: float) -> float:
+    """Calculate a signal score 0-100 based on similarity and sentiment of top sentences"""
+    if not sentence_analyses:
+        return 50.0  # Neutral if no sentences
+    
+    total_score = 0.0
+    weight_sum = 0.0
+    
+    for analysis in sentence_analyses:
+        # Weight by similarity (higher similarity = more important)
+        similarity_weight = analysis.similarity_score
+        
+        # Convert sentiment to optimism score
+        optimism = get_optimism_score(analysis.sentiment_label, analysis.sentiment_score, market_sentiment_label, market_sentiment_score)
+        
+        # Calculate weighted contribution
+        # High similarity + positive sentiment = high score
+        # Low similarity or negative sentiment = low score
+        contribution = similarity_weight * optimism * 100
+        
+        total_score += contribution * similarity_weight
+        weight_sum += similarity_weight
+    
+    # Calculate weighted average
+    if weight_sum > 0:
+        final_score = total_score / weight_sum
+    else:
+        final_score = 50.0
+    
+    # Ensure score is between 0 and 100
+    return max(0.0, min(100.0, final_score))
+
+def get_recommendation_from_score(score: float) -> str:
+    """Convert score to BUY/NEUTRAL/SELL recommendation"""
+    if score >= 70:
+        return "BUY"
+    elif score <= 30:
+        return "SELL"
+    else:
+        return "NEUTRAL"
+
+def truncate_text_for_model(text: str, max_chars: int = 2000) -> str:
+    """
+    Truncate text to a safe length for transformer models.
+    Using character-based truncation as a proxy for token limits.
+    Most models have ~512 token limit, and roughly 4 chars per token,
+    so 2000 chars should be well within limits.
+    """
+    if len(text) <= max_chars:
+        return text
+    
+    # Truncate and try to end at a sentence boundary
+    truncated = text[:max_chars]
+    
+    # Find the last sentence ending
+    last_period = truncated.rfind('.')
+    last_exclamation = truncated.rfind('!')
+    last_question = truncated.rfind('?')
+    
+    last_sentence_end = max(last_period, last_exclamation, last_question)
+    
+    # If we found a sentence ending and it's not too early, use it
+    if last_sentence_end > max_chars * 0.7:  # At least 70% of the text
+        return truncated[:last_sentence_end + 1]
+    else:
+        # Otherwise just truncate at word boundary
+        last_space = truncated.rfind(' ')
+        if last_space > max_chars * 0.8:  # At least 80% of the text
+            return truncated[:last_space]
+        else:
+            return truncated
 
 # Initialize the models
 def initialize_models():
@@ -465,6 +544,138 @@ async def extract_keywords(request: KeywordRequest):
         logger.error(f"Error in keyword extraction: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/get_signal", response_model=GetSignalResponse)
+async def get_signal(request: GetSignalRequest):
+    """Analyze article text against market text to provide trading signal"""
+    
+    try:
+        logger.info(f"Getting signal for article length: {len(request.article_text)}, market text length: {len(request.market_text)}")
+        
+        # Initialize models
+        initialize_models()
+        print("request.article_text: ", request.article_text)
+        # Step 1: Split article into sentences
+        sentences = split_into_sentences(request.article_text)
+        logger.info(f"Split article into {len(sentences)} sentences")
+        
+        if not sentences:
+            logger.warning("No sentences found in article")
+            return GetSignalResponse(
+                recommendation="NEUTRAL",
+                score=50.0,
+                top_sentences=[],
+                market_text=request.market_text
+            )
+        
+        # Step 2: Embed each sentence (truncate each sentence to avoid token limit)
+        truncated_sentences = [truncate_text_for_model(sentence) for sentence in sentences]
+        
+        # Log if any sentences were truncated
+        truncated_count = sum(1 for i, sentence in enumerate(sentences) if len(sentence) != len(truncated_sentences[i]))
+        if truncated_count > 0:
+            logger.info(f"Truncated {truncated_count} out of {len(sentences)} sentences to fit token limit")
+        
+        sentence_embeddings = similarity_model.encode(truncated_sentences, convert_to_tensor=False)
+        
+        # Step 3: Embed market text (truncate to avoid token limit)
+        truncated_market_text = truncate_text_for_model(request.market_text)
+        if len(request.market_text) != len(truncated_market_text):
+            logger.info(f"Truncated market text from {len(request.market_text)} to {len(truncated_market_text)} characters")
+        
+        market_embedding = similarity_model.encode([truncated_market_text], convert_to_tensor=False)
+        
+        # Step 4: Calculate similarities between each sentence and market text
+        similarities = cosine_similarity(sentence_embeddings, market_embedding).flatten()
+        
+        # Step 5: Get top 3 sentences by similarity
+        top_indices = np.argsort(similarities)[::-1][:3]
+        
+        # Step 6: Analyze sentiment of top sentences
+        sentiment_pipe = get_sentiment_pipeline()
+        top_sentence_analyses = []
+        
+        for idx in top_indices:
+            if similarities[idx] > 0:  # Only include positive similarities
+                sentence = sentences[idx]  # Original sentence for display
+                truncated_sentence = truncated_sentences[idx]  # Truncated for processing
+                similarity_score = float(similarities[idx])
+                
+                # Get sentiment (use truncated version to avoid token limit)
+                sentiment_result = sentiment_pipe(truncated_sentence)
+                sentiment_label = sentiment_result[0]['label']
+                sentiment_score = float(sentiment_result[0]['score'])
+                
+                analysis = SentenceAnalysis(
+                    sentence=sentence,  # Use original sentence for display
+                    similarity_score=similarity_score,
+                    sentiment_label=sentiment_label,
+                    sentiment_score=sentiment_score
+                )
+                top_sentence_analyses.append(analysis)
+                
+                logger.info(f"Top sentence similarity: {similarity_score:.3f}, sentiment: {sentiment_label} ({sentiment_score:.3f})")
+        # get sentiment of market text
+        market_sentiment_result = sentiment_pipe(request.market_text)
+        market_sentiment_label = market_sentiment_result[0]['label']
+        market_sentiment_score = float(market_sentiment_result[0]['score'])
+        # Step 7: Calculate signal score (0-100)
+        signal_score = calculate_signal_score(top_sentence_analyses, market_sentiment_label, market_sentiment_score)
+        
+        # Step 8: Get recommendation based on score
+        recommendation = get_recommendation_from_score(signal_score)
+        
+        logger.info(f"Signal analysis complete. Score: {signal_score:.1f}, Recommendation: {recommendation}")
+        
+        return GetSignalResponse(
+            recommendation=recommendation,
+            score=signal_score,
+            top_sentences=top_sentence_analyses,
+            market_text=request.market_text
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in get_signal: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/mock_get_signal", response_model=GetSignalResponse)
+async def mock_get_signal(request: GetSignalRequest):
+    """Mock version of get_signal endpoint for frontend development and testing"""
+    
+    logger.info(f"Mock signal analysis for article length: {len(request.article_text)}, market text length: {len(request.market_text)}")
+    
+    # Create mock sentence analyses with realistic data
+    mock_sentences = [
+        SentenceAnalysis(
+            sentence="The company reported strong quarterly earnings that exceeded analyst expectations by 15%.",
+            similarity_score=0.87,
+            sentiment_label="POSITIVE",
+            sentiment_score=0.92
+        ),
+        SentenceAnalysis(
+            sentence="Market conditions remain favorable with increased consumer demand and positive economic indicators.",
+            similarity_score=0.73,
+            sentiment_label="POSITIVE",
+            sentiment_score=0.85
+        ),
+        SentenceAnalysis(
+            sentence="However, some analysts express concerns about potential regulatory challenges in the coming quarter.",
+            similarity_score=0.61,
+            sentiment_label="NEGATIVE",
+            sentiment_score=0.78
+        )
+    ]
+    
+    # Mock score calculation (realistic based on the mock data above)
+    mock_score = 74.5
+    mock_recommendation = "BUY"
+    
+    return GetSignalResponse(
+        recommendation=mock_recommendation,
+        score=mock_score,
+        top_sentences=mock_sentences,
+        market_text=request.market_text
+    )
+
 @app.post("/refresh-cache")
 async def refresh_cache():
     """Manually refresh the markets cache"""
@@ -477,6 +688,79 @@ async def refresh_cache():
         "message": "Cache refreshed successfully",
         "total_markets": len(markets_cache)
     }
+
+@app.post("/sentiment")
+async def sentiment(request: Request):
+    data = await request.json()
+    text = data.get('text', '')
+    logger.info(f"/sentiment called. Text length: {len(text)}")
+    # Limit to first 3000 characters for now (simple implementation)
+    limited_text = text[:3000]
+    # TODO: Add chunking/aggregation for longer texts in the future
+    try:
+        pipe = get_sentiment_pipeline()
+        result = pipe(limited_text)
+        # result is a list of dicts, take the first
+        sentiment_label = result[0]['label']
+        sentiment_score = float(result[0]['score'])
+        logger.info(f"Sentiment result: {sentiment_label} (score: {sentiment_score:.2f})")
+        response = {
+            'sentiment': sentiment_label,
+            'score': sentiment_score,
+            'input_text': limited_text
+        }
+    except Exception as e:
+        logger.error(f"Error in /sentiment: {e}", exc_info=True)
+        response = {
+            'sentiment': 'neutral',
+            'score': 0.5,
+            'input_text': limited_text,
+            'error': str(e)
+        }
+    return JSONResponse(content=response)
+
+@app.post("/compare_sentiment")
+async def compare_sentiment(request: Request):
+    data = await request.json()
+    text = data.get('text', '')
+    market_yes_price = data.get('market_yes_price', None)
+    market_no_price = data.get('market_no_price', None)
+    logger.info(f"/compare_sentiment called. Market YES price: {market_yes_price}, Market NO price: {market_no_price}, Text length: {len(text)}")
+    if market_yes_price is None or market_no_price is None:
+        logger.warning("market_yes_price or market_no_price missing in request.")
+        return JSONResponse(status_code=400, content={"error": "market_yes_price and market_no_price are required and should be floats between 0 and 1."})
+    limited_text = text[:3000]
+    try:
+        pipe = get_sentiment_pipeline()
+        result = pipe(limited_text)
+        sentiment_label = result[0]['label']
+        sentiment_score = float(result[0]['score'])
+        article_optimism = get_optimism_score(sentiment_label, sentiment_score)
+        market_optimism = float(market_yes_price)  # For now, use YES price as optimism
+        delta = article_optimism - market_optimism
+        logger.info(f"Article optimism: {article_optimism:.2f}, Market YES optimism: {market_optimism:.2f}, Market NO price: {market_no_price}, Delta: {delta:.2f}")
+        response = {
+            'article_sentiment_label': sentiment_label,
+            'article_sentiment_score': sentiment_score,
+            'article_optimism': article_optimism,
+            'market_yes_price': float(market_yes_price),
+            'market_no_price': float(market_no_price),
+            'market_optimism': market_optimism,
+            'delta': delta,
+            'input_text': limited_text
+        }
+    except Exception as e:
+        logger.error(f"Error in /compare_sentiment: {e}", exc_info=True)
+        response = {
+            'error': str(e),
+            'article_optimism': None,
+            'market_yes_price': market_yes_price,
+            'market_no_price': market_no_price,
+            'market_optimism': None,
+            'delta': None,
+            'input_text': limited_text
+        }
+    return JSONResponse(content=response)
 
 if __name__ == "__main__":
     import uvicorn
