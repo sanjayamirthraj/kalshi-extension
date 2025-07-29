@@ -1,12 +1,6 @@
 # Kalshi Market Finder Chrome Extension
 
-AI-powered Chrome extension that finds relevant Kalshi prediction markets based on webpage content using semantic similarity and named entity recognition.
-
-## Features
-
-- 🔍 **AI-Powered Search**: Uses advanced NLP models for keyword extraction and semantic similarity
-- 🎯 **Smart Market Matching**: Finds relevant prediction markets based on page content
-- ⚡ **Background Processing**: Pre-processes pages for instant results
+AI-powered Chrome extension that finds relevant Kalshi prediction markets based on webpage content 
 
 ## Local Setup
 
@@ -19,7 +13,7 @@ AI-powered Chrome extension that finds relevant Kalshi prediction markets based 
 ### 1. Clone the Repository
 
 ```bash
-git clone <your-repo-url>
+git clone <repo-url>
 cd kalshi-extension
 ```
 
@@ -34,7 +28,7 @@ pip install fastapi uvicorn requests sentence-transformers transformers torch sc
 #### Start the Backend Server
 
 ```bash
-python server.py
+cs server && python server.py
 ```
 
 The server will start on `http://localhost:8000`. You should see:
@@ -141,4 +135,4 @@ Created by [@sanjayamirthraj](https://twitter.com/sanjayamirthraj) & [@pranav_ja
 
 ## License
 
-MIT License - See LICENSE file for details
+MIT
